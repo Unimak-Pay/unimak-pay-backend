@@ -49,6 +49,9 @@ export class InitiatePaymentUseCase {
       payment = await this.prisma.$transaction(async (tx) => {
         const o = await this.payments.lockObligation(input.obligationId, tx);
         if (!o) throw new DomainError('NOT_FOUND', 'Obligation not found');
+        if (!o.settlementAccount) {
+          throw new DomainError('INVALID_STATE', `Fee type ${o.feeTypeCode} has no Monime financial account yet (run pnpm monime:provision)`);
+        }
         await this.payments.expireDue(now, o.id, tx);
         const ev = await this.evaluator.evaluate(o, input.amount, input.channel, now, tx);
         return this.payments.create(
@@ -90,18 +93,18 @@ export class InitiatePaymentUseCase {
   private async startCollection(p: PaymentRecord): Promise<PaymentRecord> {
     const o = (await this.payments.obligationInfo(p.obligationId))!;
     try {
-      const res = await this.monime.initiateCollection({
-        reference: p.id,
+      const minutesLeft = Math.max(1, Math.ceil((p.expiresAt.getTime() - Date.now()) / 60_000));
+      const code = await this.monime.createPaymentCode({
+        idempotencyKey: p.id,
+        name: `UNIMAK ${o.feeName}`,
         amount: p.amount,
-        currency: 'SLE',
-        payerPhone: p.payerPhone,
-        channel: p.channel,
-        settlementAccount: o.settlementAccount,
-        description: `UNIMAK ${o.feeName} — ${o.payerRef}`,
-        expiresAt: p.expiresAt,
-        metadata: { paymentId: p.id, obligationId: o.id, payerRef: o.payerRef, feeTypeCode: o.feeTypeCode },
+        durationMinutes: minutesLeft,
+        reference: p.id,
+        authorizedPhoneNumber: p.payerPhone,
+        financialAccountId: o.settlementAccount!,
+        metadata: { paymentId: p.id, obligationId: o.id, payerRef: o.payerRef, feeTypeCode: o.feeTypeCode, channel: p.channel },
       });
-      return await this.transitionAfterInitiate(p.id, { status: 'PENDING', monimeRef: res.monimeRef });
+      return await this.transitionAfterInitiate(p.id, { status: 'PENDING', monimeRef: code.id, ussdCode: code.ussdCode ?? undefined });
     } catch (err) {
       if (err instanceof MonimeError && err.code === 'REJECTED') {
         this.logger.warn(`Monime rejected payment ${p.id}: ${err.message}`);
@@ -117,12 +120,14 @@ export class InitiatePaymentUseCase {
   /** Only moves INITIATED → PENDING/FAILED; a webhook may already have finished it. */
   private async transitionAfterInitiate(
     id: string,
-    patch: { status: 'PENDING' | 'FAILED'; monimeRef?: string; failureReason?: string },
+    patch: { status: 'PENDING' | 'FAILED'; monimeRef?: string; ussdCode?: string; failureReason?: string },
   ): Promise<PaymentRecord> {
     return this.prisma.$transaction(async (tx) => {
       const cur = (await this.payments.lockPayment(id, tx))!;
       if (cur.status !== 'INITIATED') {
-        return patch.monimeRef && !cur.monimeRef ? this.payments.update(id, { monimeRef: patch.monimeRef }, tx) : cur;
+        return patch.monimeRef && !cur.monimeRef
+          ? this.payments.update(id, { monimeRef: patch.monimeRef, ussdCode: patch.ussdCode ?? null }, tx)
+          : cur;
       }
       return this.payments.update(id, patch, tx);
     });

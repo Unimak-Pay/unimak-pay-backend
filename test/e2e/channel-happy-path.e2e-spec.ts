@@ -5,26 +5,21 @@ import type { INestApplication } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { createApp } from '../../src/bootstrap';
+import { ProvisionAccountsUseCase } from '../../src/modules/treasury/application/provision-accounts.use-case';
 import { signMonimePayload } from '../../src/modules/webhooks/domain/monime-signature';
+import { channel as signedChannel } from './helpers';
 import { TEST_CLIENT, TEST_CRON_SECRET, TEST_WEBHOOK_SECRET } from './test-env';
 
 let app: INestApplication;
 let http: ReturnType<typeof request>;
 const prisma = new PrismaClient();
 
-/** Signed channel-API request. */
-function channel(method: 'get' | 'post', url: string, body?: object) {
-  const raw = body ? JSON.stringify(body) : '';
-  const ts = Math.floor(Date.now() / 1000).toString();
-  const sig = createHmac('sha256', TEST_CLIENT.secret).update(`${ts}.${raw}`).digest('hex');
-  let req = http[method](url).set('x-api-key', TEST_CLIENT.apiKey).set('x-timestamp', ts).set('x-signature', sig);
-  if (body) req = req.set('content-type', 'application/json').send(raw);
-  return req;
-}
+const channel = (method: 'get' | 'post', url: string, body?: object) => signedChannel(http, method, url, body);
 
 beforeAll(async () => {
   app = await createApp();
   http = request(app.getHttpServer());
+  await app.get(ProvisionAccountsUseCase).execute(); // one Monime account per fee type + platform
 });
 
 afterAll(async () => {
@@ -63,6 +58,7 @@ describe('channel API happy path: lookup → initiate → webhook → receipt + 
     const body = { obligationId, amount: '50000', payerPhone: '+23299100004', channel: 'USSD', idempotencyKey: 'e2e-app-0004-1' };
     const res = await channel('post', '/v1/channel/payments', body).expect(201);
     expect(res.body.status).toBe('PENDING');
+    expect(res.body.ussdCode).toMatch(/^\*715\*1\*\d+#$/);
     const mins = (new Date(res.body.expiresAt).getTime() - Date.now()) / 60_000;
     expect(mins).toBeGreaterThan(14);
     expect(mins).toBeLessThanOrEqual(15);
@@ -117,9 +113,14 @@ describe('channel API happy path: lookup → initiate → webhook → receipt + 
       ['portal.application_paid', 'SENT'],
       ['sms.receipt', 'SENT'],
     ]);
-    const transfer = rows[0]!.payload as Record<string, string>;
-    expect(transfer).toEqual({ paymentId, fromAccount: 'fa-unimak-application', toAccount: 'fa-platform-commission', amount: '750' });
-    expect(await prisma.mockMonimeRecord.findUnique({ where: { id: `mock_trf_${paymentId}` } })).toMatchObject({ kind: 'TRANSFER', amount: 750n });
+    expect(rows[0]!.payload).toEqual({ paymentId, fromAccount: 'fac-mock-unimak-fee-app', amount: '750' });
+    // commission → internal transfer from the APP account to the platform account
+    const transfer = await prisma.transfer.findUniqueOrThrow({ where: { paymentId } });
+    expect(transfer).toMatchObject({
+      kind: 'COMMISSION', amount: 750n, status: 'SUBMITTED',
+      sourceAccount: 'fac-mock-unimak-fee-app', destinationAccount: 'fac-mock-unimak-platform',
+      monimeTransferId: `trn-mock-commission-${paymentId}`.slice(0, 64),
+    });
 
     const log = JSON.parse(readFileSync(path.join(process.env.PORTAL_FIXTURES_DIR!, 'notifications.log.json'), 'utf8')) as { payload: Record<string, string> }[];
     expect(log.at(-1)!.payload).toMatchObject({ event: 'application_paid', applicationRef: ref, amount: '50000' });
@@ -159,7 +160,7 @@ describe('POST /webhooks/monime (signed, as Monime sends it)', () => {
       object: { id: 'spm-e2e-raw-1', type: 'payment' },
       data: {
         id: 'spm-e2e-raw-1', status: 'completed', amount: { currency: 'SLE', value: 200000 },
-        financialAccountId: 'fa-unimak-tuition', reference: p.id,
+        financialAccountId: 'fac-mock-unimak-fee-tuition', reference: p.id,
         fees: [{ code: 'processing', amount: { currency: 'SLE', value: 50 } }],
         ownershipGraph: { owner: { id: p.monimeRef, type: 'payment_code' } },
       },
@@ -191,7 +192,7 @@ describe('POST /webhooks/monime (signed, as Monime sends it)', () => {
   });
 
   it('ignores events it does not handle', async () => {
-    const raw = JSON.stringify({ event: { id: 'evt-e2e-other', name: 'payout.completed' }, object: {}, data: {} });
+    const raw = JSON.stringify({ event: { id: 'evt-e2e-other', name: 'checkout_session.completed' }, object: {}, data: {} });
     const header = signMonimePayload(raw, TEST_WEBHOOK_SECRET, String(Math.floor(Date.now() / 1000)));
     const res = await http.post('/webhooks/monime').set('content-type', 'application/json').set('Monime-Signature', header).send(raw).expect(200);
     expect(res.body.result).toBe('IGNORED');

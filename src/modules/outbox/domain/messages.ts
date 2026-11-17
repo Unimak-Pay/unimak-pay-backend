@@ -14,8 +14,8 @@ export interface PortalApplicationPaidPayload {
 
 export interface CommissionTransferPayload {
   paymentId: string;
+  /** fee type's Monime account (fac-…) */
   fromAccount: string;
-  toAccount: string;
   amount: string;
 }
 

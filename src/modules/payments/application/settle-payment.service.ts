@@ -32,16 +32,8 @@ export interface CompletedMonimePayment {
   occurredAt: Date;
 }
 
-export type SettlementOutcome = 'PROCESSED' | 'IGNORED' | 'UNMATCHED';
-
-export interface SettlementResult {
-  outcome: SettlementOutcome;
-  note?: string;
-  paymentId?: string;
-  receiptNumber?: string;
-  /** outbox messages written; dispatch them after commit */
-  outboxKeys: string[];
-}
+import type { SettlementResult } from './settlement-result';
+export type { SettlementOutcome, SettlementResult } from './settlement-result';
 
 /**
  * Applies payment.processing_completed inside the caller's transaction.
@@ -114,7 +106,7 @@ export class SettlePaymentService {
     tx: Db,
     p: PaymentRecord,
     ev: CompletedMonimePayment,
-  ): Promise<{ receiptNumber: string; outboxKeys: string[]; settlementAccount: string }> {
+  ): Promise<{ receiptNumber: string; outboxKeys: string[]; settlementAccount: string | null }> {
     const completedAt = ev.occurredAt;
     await this.payments.update(
       p.id,
@@ -162,7 +154,8 @@ export class SettlePaymentService {
       messages.push({
         type: 'monime.commission_transfer',
         dedupeKey: `monime.commission_transfer:${p.id}`,
-        payload: { paymentId: p.id, fromAccount: o.settlementAccount, toAccount: this.config.get('PLATFORM_MONIME_ACCOUNT'), amount: p.platformFee.toString() },
+        // destination (platform account) is resolved when the transfer is sent
+        payload: { paymentId: p.id, fromAccount: o.settlementAccount!, amount: p.platformFee.toString() },
       });
     }
     const outboxKeys = await this.outbox.enqueue(tx, messages);

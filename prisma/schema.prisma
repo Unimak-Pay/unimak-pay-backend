@@ -75,11 +75,11 @@ model FeeType {
   name              String
   payerKind         PayerKind
   recurrence        Recurrence
-  /// Monime financial account that receives collections for this fee type
-  settlementAccount String
   createdAt         DateTime   @default(now())
 
-  fees Fee[]
+  fees    Fee[]
+  /// Monime financial account collections for this fee type settle into
+  account FinancialAccount?
 }
 
 model Fee {
@@ -238,8 +238,10 @@ model Payment {
   idempotencyKey  String
   payerPhone      String
   status          PaymentStatus @default(INITIATED)
-  /// Monime-side id of what we created at initiation (collection / payment code)
+  /// Monime payment code id (pmc-…) created at initiation
   monimeRef       String?       @unique
+  /// USSD string the payer dials, e.g. *715*1*7344331308#
+  ussdCode        String?
   /// Monime Payment id (spm-…) from payment.processing_completed
   monimePaymentId String?       @unique
   pricingConfigId String        @db.Uuid
@@ -329,6 +331,100 @@ model OutboxMessage {
   sentAt        DateTime?
 
   @@index([status, nextAttemptAt])
+}
+
+// ───────────────────────────── Monime accounts, transfers, payouts ─────────────────────────────
+
+enum FinancialAccountPurpose {
+  /// receives collections for one fee type (one account per service)
+  FEE_TYPE
+  /// the platform's own account (receives commission)
+  PLATFORM
+}
+
+/// Mirror of a Monime financial account we provisioned.
+model FinancialAccount {
+  id               String                  @id @default(uuid()) @db.Uuid
+  /// Monime id (fac-…)
+  monimeId         String                  @unique
+  /// our provisioning key, also Monime's (unique per Space) reference
+  reference        String                  @unique
+  name             String
+  purpose          FinancialAccountPurpose
+  feeTypeId        String?                 @unique @db.Uuid
+  uvan             String?
+  /// last known available balance (minor units) from Monime
+  availableBalance BigInt?
+  balanceUpdatedAt DateTime?
+  createdAt        DateTime                @default(now())
+
+  feeType FeeType? @relation(fields: [feeTypeId], references: [id])
+  payouts Payout[]
+}
+
+enum TransferStatus {
+  /// recorded, not yet accepted by Monime
+  PENDING
+  /// accepted by Monime (pending/processing there)
+  SUBMITTED
+  COMPLETED
+  FAILED
+}
+
+/// Internal transfer between our Monime accounts (platform commission per payment).
+model Transfer {
+  id                 String         @id @default(uuid()) @db.Uuid
+  kind               String // COMMISSION
+  paymentId          String?        @unique @db.Uuid
+  sourceAccount      String
+  destinationAccount String
+  amount             BigInt
+  status             TransferStatus @default(PENDING)
+  monimeTransferId   String?        @unique
+  failureCode        String?
+  failureMessage     String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  completedAt        DateTime?
+
+  @@index([status])
+}
+
+enum PayoutStatus {
+  /// recorded, not yet accepted by Monime
+  REQUESTED
+  SUBMITTED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+/// Withdrawal from one of our Monime accounts to a bank (or momo) account.
+model Payout {
+  id                 String       @id @default(uuid()) @db.Uuid
+  financialAccountId String       @db.Uuid
+  amount             BigInt
+  destinationType    String // bank | momo
+  providerId         String
+  /// bank account number (or MSISDN for momo)
+  accountNumber      String
+  accountName        String?
+  narration          String?
+  status             PayoutStatus @default(REQUESTED)
+  monimePayoutId     String?      @unique
+  /// Monime fees reported on the payout
+  fees               BigInt?
+  failureCode        String?
+  failureMessage     String?
+  requestedBy        String
+  idempotencyKey     String       @unique
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  completedAt        DateTime?
+
+  financialAccount FinancialAccount @relation(fields: [financialAccountId], references: [id])
+
+  @@index([financialAccountId, status])
 }
 
 // ───────────────────────────── Dev-only mocks ─────────────────────────────

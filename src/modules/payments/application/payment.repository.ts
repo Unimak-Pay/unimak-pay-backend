@@ -15,6 +15,7 @@ export interface PaymentRecord {
   payerPhone: string;
   status: PaymentStatus;
   monimeRef: string | null;
+  ussdCode: string | null;
   monimePaymentId: string | null;
   pricingConfigId: string;
   monimeFee: Minor;
@@ -49,7 +50,8 @@ export interface LockedObligation {
   feeActive: boolean;
   feeName: string;
   feeTypeCode: string;
-  settlementAccount: string;
+  /** Monime financial account (fac-…); null until provisioned */
+  settlementAccount: string | null;
   allowInstalments: boolean;
   defaultMinInstalment: Minor | null;
   payerId: string;
@@ -70,7 +72,7 @@ export interface PaymentRepository {
   create(p: NewPayment, db: Db): Promise<PaymentRecord>;
   update(
     id: string,
-    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'monimePaymentId' | 'completedAt' | 'failureReason'>>,
+    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'ussdCode' | 'monimePaymentId' | 'completedAt' | 'failureReason'>>,
     db?: Db,
   ): Promise<PaymentRecord>;
   /** Marks open payments past expiry as EXPIRED. Returns count. */

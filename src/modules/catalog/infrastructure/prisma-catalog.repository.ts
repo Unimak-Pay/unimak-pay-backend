@@ -12,7 +12,7 @@ import type { PayerKind } from '../domain/payer-profile';
 import type { RateRule } from '../domain/rate-rule';
 
 const feeInclude = {
-  feeType: true,
+  feeType: { include: { account: true } },
   rateRules: true,
   eligibilityRules: true,
 } satisfies Prisma.FeeInclude;
@@ -34,7 +34,7 @@ function toFee(row: FeeRow): FeeWithRules {
       name: row.feeType.name,
       payerKind: row.feeType.payerKind,
       recurrence: row.feeType.recurrence,
-      settlementAccount: row.feeType.settlementAccount,
+      settlementAccount: row.feeType.account?.monimeId ?? null,
     },
     rateRules: row.rateRules.map(toRateRule),
     eligibilityRules: row.eligibilityRules.map((e) => ({

@@ -46,6 +46,8 @@ export function presentPayment(p: PaymentRecord, now = new Date()) {
     amount: money(p.amount),
     channel: p.channel,
     expiresAt: p.expiresAt.toISOString(),
+    /** what the payer dials to approve (Monime payment code) */
+    ussdCode: status === 'PENDING' ? p.ussdCode : null,
     completedAt: p.completedAt?.toISOString() ?? null,
     failureReason: status === 'FAILED' ? p.failureReason : null,
   };

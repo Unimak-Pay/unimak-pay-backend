@@ -6,8 +6,8 @@ import { isOpen } from '../domain/payment-status';
 import { PAYMENT_REPOSITORY, type PaymentRecord, type PaymentRepository } from './payment.repository';
 
 /**
- * Monime sends no "payment failed" webhook, so an open payment whose Monime
- * collection failed/expired is closed by polling. Completion is never taken
+ * We don't subscribe to payment_code.expired/cancelled, so an open payment
+ * whose Monime payment code expired or was cancelled is closed by polling. Completion is never taken
  * from polling — only the webhook marks COMPLETED.
  */
 @Injectable()
@@ -25,8 +25,10 @@ export class ReconcilePaymentUseCase {
     if (!p) throw new DomainError('NOT_FOUND', 'Payment not found');
     if (!isOpen(p.status) || !p.monimeRef) return p;
 
-    const remote = await this.monime.getPayment(p.monimeRef);
-    if (remote.status !== 'FAILED' && remote.status !== 'EXPIRED') return p;
+    const code = await this.monime.getPaymentCode(p.monimeRef);
+    const closed = code.status === 'expired' ? 'EXPIRED' : code.status === 'cancelled' ? 'FAILED' : null;
+    if (!closed) return p;
+    const remote = { status: closed } as const;
 
     return this.prisma.$transaction(async (tx) => {
       const cur = (await this.payments.lockPayment(p.id, tx))!;

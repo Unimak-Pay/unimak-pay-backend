@@ -12,7 +12,7 @@
     "start": "node dist/src/main.js",
     "dev": "tsc -p tsconfig.build.json && node --env-file=.env --watch-path=dist dist/src/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "jest",
+    "test": "NODE_OPTIONS=\"--experimental-vm-modules --no-warnings=ExperimentalWarning\" jest",
     "test:e2e": "NODE_OPTIONS=\"--experimental-vm-modules --no-warnings=ExperimentalWarning\" jest --config test/jest-e2e.json --runInBand",
     "db:up": "docker compose up -d db",
     "db:migrate": "prisma migrate dev",

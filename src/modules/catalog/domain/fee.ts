@@ -12,7 +12,8 @@ export interface FeeTypeInfo {
   name: string;
   payerKind: PayerKind;
   recurrence: Recurrence;
-  settlementAccount: string;
+  /** Monime financial account (fac-…); null until provisioned */
+  settlementAccount: string | null;
 }
 
 /** A fee with everything needed to decide who owes it and how much. */

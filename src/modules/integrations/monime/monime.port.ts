@@ -1,52 +1,126 @@
 /**
- * Port to Monime. Shapes here are OUR normalized view; each adapter maps to/from
- * Monime's wire format.
+ * Port to Monime (API caph.2025-08-23). Shapes follow Monime's objects with
+ * bigint minor units; adapters map to/from the wire format.
+ * Reference: https://docs.monime.io/apis/openapi/caph-2025-08-23.json
  */
 export const MONIME_CLIENT = Symbol('MonimeClient');
 
-export type MonimeChannel = 'USSD' | 'DOTS';
-export type MonimePaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
+export type Currency = 'SLE';
 
-export interface InitiateCollectionInput {
-  /** Our payment id. Also used as the idempotency key towards Monime. */
-  reference: string;
+// ── Payment codes (USSD collections) ─────────────────────────────────────────
+
+export type PaymentCodeStatus = 'pending' | 'processing' | 'completed' | 'expired' | 'cancelled';
+
+export interface CreatePaymentCodeInput {
+  idempotencyKey: string;
+  /** 3–64 chars, shown to the payer */
+  name: string;
   amount: bigint;
-  currency: 'SLE';
-  payerPhone: string;
-  channel: MonimeChannel;
-  /** Monime financial account the money settles into (per fee type). */
-  settlementAccount: string;
-  description: string;
-  expiresAt: Date;
+  durationMinutes: number;
+  /** our payment id (≤ 64 chars) */
+  reference: string;
+  /** only this MSISDN may pay the code */
+  authorizedPhoneNumber?: string;
+  /** settlement financial account (fac-…) */
+  financialAccountId: string;
   metadata: Record<string, string>;
 }
 
-export interface InitiateCollectionResult {
-  monimeRef: string;
-  status: MonimePaymentStatus;
-}
-
-export interface MonimePaymentView {
-  monimeRef: string;
+export interface PaymentCodeView {
+  id: string;
+  status: PaymentCodeStatus;
+  ussdCode: string | null;
+  expireTime: string | null;
   reference: string | null;
-  status: MonimePaymentStatus;
   amount: bigint;
 }
 
-export interface TransferInput {
-  /** Our idempotency key (we use the payment id). */
+// ── Financial accounts ───────────────────────────────────────────────────────
+
+export interface CreateFinancialAccountInput {
   idempotencyKey: string;
-  fromAccount: string;
-  toAccount: string;
-  amount: bigint;
-  currency: 'SLE';
-  description: string;
+  /** ≤ 100 chars */
+  name: string;
+  currency: Currency;
+  /** unique per Space (≤ 64 chars) — our provisioning key */
+  reference: string;
+  description?: string;
+  metadata?: Record<string, string>;
 }
 
-export interface TransferResult {
-  transferId: string;
-  status: 'PENDING' | 'COMPLETED' | 'FAILED';
+export interface FinancialAccountView {
+  id: string;
+  uvan: string | null;
+  name: string;
+  currency: string;
+  reference: string | null;
+  /** available balance in minor units; null unless requested */
+  available: bigint | null;
 }
+
+// ── Internal transfers ───────────────────────────────────────────────────────
+
+export type InternalTransferStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface CreateInternalTransferInput {
+  idempotencyKey: string;
+  amount: bigint;
+  sourceAccountId: string;
+  destinationAccountId: string;
+  metadata: Record<string, string>;
+}
+
+export interface InternalTransferView {
+  id: string;
+  status: InternalTransferStatus;
+  amount: bigint;
+  failure: { code: string; message: string | null } | null;
+}
+
+// ── Payouts ──────────────────────────────────────────────────────────────────
+
+export type PayoutStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export type PayoutDestination =
+  | { type: 'bank'; providerId: string; accountNumber: string }
+  | { type: 'momo'; providerId: string; phoneNumber: string };
+
+export interface CreatePayoutInput {
+  idempotencyKey: string;
+  amount: bigint;
+  sourceAccountId: string;
+  destination: PayoutDestination;
+  metadata: Record<string, string>;
+}
+
+export interface PayoutView {
+  id: string;
+  status: PayoutStatus;
+  amount: bigint;
+  /** sum of Monime fees (SLE) */
+  fees: bigint;
+  failure: { code: string; message: string | null } | null;
+}
+
+export interface BankView {
+  providerId: string;
+  name: string;
+  active: boolean;
+  canPayTo: boolean;
+}
+
+// ── Webhooks ─────────────────────────────────────────────────────────────────
+
+export interface CreateWebhookInput {
+  idempotencyKey: string;
+  name: string;
+  url: string;
+  events: string[];
+  /** HS256 shared secret, 32–256 chars */
+  secret: string;
+}
+
+// ── Errors ───────────────────────────────────────────────────────────────────
 
 export type MonimeErrorCode = 'UNAVAILABLE' | 'REJECTED' | 'NOT_FOUND' | 'BAD_RESPONSE';
 
@@ -62,7 +136,19 @@ export class MonimeError extends Error {
 }
 
 export interface MonimeClient {
-  initiateCollection(input: InitiateCollectionInput): Promise<InitiateCollectionResult>;
-  getPayment(monimeRef: string): Promise<MonimePaymentView>;
-  transfer(input: TransferInput): Promise<TransferResult>;
+  createPaymentCode(input: CreatePaymentCodeInput): Promise<PaymentCodeView>;
+  getPaymentCode(id: string): Promise<PaymentCodeView>;
+
+  createFinancialAccount(input: CreateFinancialAccountInput): Promise<FinancialAccountView>;
+  getFinancialAccount(id: string, opts?: { withBalance?: boolean }): Promise<FinancialAccountView>;
+  findFinancialAccountByReference(reference: string): Promise<FinancialAccountView | null>;
+
+  createInternalTransfer(input: CreateInternalTransferInput): Promise<InternalTransferView>;
+  getInternalTransfer(id: string): Promise<InternalTransferView>;
+
+  createPayout(input: CreatePayoutInput): Promise<PayoutView>;
+  getPayout(id: string): Promise<PayoutView>;
+  listBanks(country: string): Promise<BankView[]>;
+
+  createWebhook(input: CreateWebhookInput): Promise<{ id: string }>;
 }

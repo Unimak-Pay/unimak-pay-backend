@@ -63,7 +63,7 @@ export class ChannelController {
       idempotencyKey: dto.idempotencyKey,
     });
     const v = presentPayment(p);
-    return { paymentId: v.paymentId, status: v.status, expiresAt: v.expiresAt };
+    return { paymentId: v.paymentId, status: v.status, expiresAt: v.expiresAt, ussdCode: v.ussdCode };
   }
 
   @Get('payments/:id')

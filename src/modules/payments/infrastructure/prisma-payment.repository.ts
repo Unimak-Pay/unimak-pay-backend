@@ -44,7 +44,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
   async obligationInfo(obligationId: string, db: Db = this.prisma): Promise<LockedObligation | null> {
     const o = await db.obligation.findUnique({
       where: { id: obligationId },
-      include: { fee: { include: { feeType: true } }, payer: true },
+      include: { fee: { include: { feeType: { include: { account: true } } } }, payer: true },
     });
     if (!o) return null;
     return {
@@ -55,7 +55,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
       feeActive: o.fee.status === 'ACTIVE',
       feeName: o.fee.name,
       feeTypeCode: o.fee.feeType.code,
-      settlementAccount: o.fee.feeType.settlementAccount,
+      settlementAccount: o.fee.feeType.account?.monimeId ?? null,
       allowInstalments: o.fee.allowInstalments,
       defaultMinInstalment: o.fee.defaultMinInstalment,
       payerId: o.payerId,

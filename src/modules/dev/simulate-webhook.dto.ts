@@ -1,14 +1,29 @@
 import { IsIn, IsOptional, IsString, IsUUID, Length, Matches } from 'class-validator';
 
+/** Exactly one of paymentId / transferId / payoutId (our ids). */
 export class SimulateWebhookDto {
+  @IsOptional()
   @IsUUID()
-  paymentId!: string;
+  paymentId?: string;
 
-  /** completed → signed payment.processing_completed webhook; failed/expired → Monime-side failure + reconciliation */
+  @IsOptional()
+  @IsUUID()
+  transferId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  payoutId?: string;
+
+  /**
+   * payment:  completed → payment.processing_completed; failed/expired → payment code
+   *           cancelled/expired in the mock + reconciliation (no webhook)
+   * transfer: completed | failed → internal_transfer.*
+   * payout:   completed | failed → payout.*
+   */
   @IsIn(['completed', 'failed', 'expired'])
   outcome!: 'completed' | 'failed' | 'expired';
 
-  /** Override the collected amount (minor units) to test mismatches. */
+  /** Override the reported amount (minor units) to test mismatches. */
   @IsOptional()
   @Matches(/^[1-9]\d{0,17}$/)
   amount?: string;

@@ -1,7 +1,7 @@
 import { signMonimePayload, verifyMonimeSignature } from './monime-signature';
 import { InvalidWebhookPayloadError, parseCompletedPayment, parseMonimeWebhook } from './monime-webhook';
 
-const SECRET = 'test-secret-0123456789abcdef';
+const SECRET = 'test-secret-0123456789abcdef0123456789';
 
 describe('Monime signature', () => {
   const body = Buffer.from('{"event":{"id":"evt-1","name":"x"}}');
@@ -70,5 +70,52 @@ describe('Monime webhook parsing', () => {
     expect(parseCompletedPayment(parseMonimeWebhook(envelope({ amount: { currency: 'SLE', value: '10' } }))).monimePaymentId).toBe('spm-1');
     expect(() => parseCompletedPayment(parseMonimeWebhook(envelope({ amount: { currency: 'SLE', value: 1.5 } })))).toThrow(InvalidWebhookPayloadError);
     expect(() => parseCompletedPayment(parseMonimeWebhook(envelope({ amount: { currency: 'SLE', value: 0 } })))).toThrow(/positive/);
+  });
+});
+
+describe('treasury event parsing', () => {
+  const env = (name: string, object: Record<string, unknown>, data: Record<string, unknown>) =>
+    parseMonimeWebhook({ apiVersion: 'caph.2025-08-23', event: { id: 'evt-x', name, timestamp: '1773386779' }, object, data });
+
+  it('reads internal_transfer.* (InternalTransfer object)', () => {
+    const { parseInternalTransfer } = jest.requireActual('./monime-webhook');
+    expect(parseInternalTransfer(env('internal_transfer.failed', { id: 'trn-1', type: 'internal_transfer' }, {
+      id: 'trn-1', status: 'failed', amount: { currency: 'SLE', value: 750 },
+      failureDetail: { code: 'fund_insufficient', message: 'Not enough funds' }, metadata: { transferId: 't-1' },
+    }))).toEqual({ monimeTransferId: 'trn-1', amount: 750n, failure: { code: 'fund_insufficient', message: 'Not enough funds' }, metadata: { transferId: 't-1' } });
+  });
+
+  it('reads payout.* with fees (Payout object)', () => {
+    const { parsePayout } = jest.requireActual('./monime-webhook');
+    expect(parsePayout(env('payout.completed', { id: 'pyt-1', type: 'payout' }, {
+      id: 'pyt-1', status: 'completed', amount: { currency: 'SLE', value: 100000 },
+      fees: [{ code: 'payout', amount: { currency: 'SLE', value: 500 } }], metadata: { payoutId: 'p-1' },
+    }))).toEqual({ monimePayoutId: 'pyt-1', amount: 100000n, fees: 500n, failure: null, metadata: { payoutId: 'p-1' } });
+  });
+
+  it('reads financial_account.* leniently', () => {
+    const { parseAccountMovement } = jest.requireActual('./monime-webhook');
+    // FinancialTransaction-like
+    expect(parseAccountMovement(env('financial_account.credited', { id: 'txn-1', type: 'financial_transaction' }, {
+      id: 'txn-1', type: 'credit', amount: { currency: 'SLE', value: 15000 }, financialAccount: { id: 'fac-1', balance: { after: { currency: 'SLE', value: 99000 } } },
+    }))).toEqual({ accountId: 'fac-1', amount: 15000n, balanceAfter: 99000n });
+    // FinancialAccount-like
+    expect(parseAccountMovement(env('financial_account.debited', { id: 'fac-2', type: 'financial_account' }, {
+      id: 'fac-2', balance: { available: { currency: 'SLE', value: '42' } },
+    }))).toEqual({ accountId: 'fac-2', amount: null, balanceAfter: 42n });
+    // unknown shape: no throw
+    expect(parseAccountMovement(env('financial_account.credited', {}, { foo: 1 }))).toEqual({ accountId: null, amount: null, balanceAfter: null });
+  });
+});
+
+describe('eventTime', () => {
+  const { eventTime } = jest.requireActual('./monime-webhook');
+  const at = (timestamp: string | null) => eventTime({ apiVersion: null, event: { id: 'e', name: 'n', timestamp }, object: { id: null, type: null }, data: {} }, new Date(0));
+  it('reads unix seconds, ms and ISO; falls back otherwise', () => {
+    expect(at('1773386779').toISOString()).toBe('2026-03-13T07:26:19.000Z');
+    expect(at('1773386779000').toISOString()).toBe('2026-03-13T07:26:19.000Z');
+    expect(at('2026-11-17T12:00:00Z').toISOString()).toBe('2026-11-17T12:00:00.000Z');
+    expect(at('nope').getTime()).toBe(0);
+    expect(at(null).getTime()).toBe(0);
   });
 });

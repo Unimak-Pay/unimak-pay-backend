@@ -73,8 +73,9 @@ export class EnvSchema {
   @IsOptional()
   MONIME_SPACE_ID?: string;
 
+  /** HS256 secret shared with Monime (Monime requires 32–256 chars). */
   @IsString()
-  @MinLength(16)
+  @MinLength(32)
   MONIME_WEBHOOK_SECRET!: string;
 
   /**
@@ -88,9 +89,13 @@ export class EnvSchema {
   @IsOptional()
   MONIME_WEBHOOK_TOLERANCE_SECONDS?: number;
 
-  /** Monime financial account that receives the platform commission. */
+  /**
+   * Fallback commission destination (fac-…) if no PLATFORM account has been
+   * provisioned (pnpm monime:provision creates one).
+   */
   @IsString()
-  PLATFORM_MONIME_ACCOUNT!: string;
+  @IsOptional()
+  PLATFORM_MONIME_ACCOUNT?: string;
 
   // ---- Channel API / cron ----
   /** JSON array: [{"id":"ussd","apiKey":"...","secret":"..."}] */

@@ -11,11 +11,11 @@ const prisma = new PrismaClient();
 const SLE = (n: number): bigint => BigInt(Math.round(n * 100));
 
 const FEE_TYPES = [
-  { code: 'APP', name: 'Application fee', payerKind: 'APPLICANT', recurrence: 'ONCE', settlementAccount: 'fa-unimak-application' },
-  { code: 'MATRIC', name: 'Matriculation fee', payerKind: 'STUDENT', recurrence: 'ONCE', settlementAccount: 'fa-unimak-matriculation' },
-  { code: 'TUITION', name: 'Tuition', payerKind: 'STUDENT', recurrence: 'PER_YEAR', settlementAccount: 'fa-unimak-tuition' },
-  { code: 'DEPT', name: 'Departmental fee', payerKind: 'STUDENT', recurrence: 'PER_YEAR', settlementAccount: 'fa-unimak-departmental' },
-  { code: 'GRAD', name: 'Graduation fee', payerKind: 'STUDENT', recurrence: 'ONCE', settlementAccount: 'fa-unimak-graduation' },
+  { code: 'APP', name: 'Application fee', payerKind: 'APPLICANT', recurrence: 'ONCE' },
+  { code: 'MATRIC', name: 'Matriculation fee', payerKind: 'STUDENT', recurrence: 'ONCE' },
+  { code: 'TUITION', name: 'Tuition', payerKind: 'STUDENT', recurrence: 'PER_YEAR' },
+  { code: 'DEPT', name: 'Departmental fee', payerKind: 'STUDENT', recurrence: 'PER_YEAR' },
+  { code: 'GRAD', name: 'Graduation fee', payerKind: 'STUDENT', recurrence: 'ONCE' },
 ] as const satisfies readonly Omit<Prisma.FeeTypeCreateInput, 'fees'>[];
 
 type Rule = Omit<RateRule, 'id'>;

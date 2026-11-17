@@ -4,13 +4,17 @@ import { PrismaService } from '../../../shared/infrastructure/prisma.service';
 import { OutboxDispatcher } from '../../outbox/application/outbox-dispatcher';
 import { type SettlementResult, SettlePaymentService } from '../../payments/application/settle-payment.service';
 import { verifyMonimeSignature } from '../domain/monime-signature';
+import { TreasuryEventsService } from '../../treasury/application/treasury-events.service';
 import {
   eventTime,
   InvalidWebhookPayloadError,
+  MONIME_EVENTS,
   type MonimeWebhookEnvelope,
+  parseAccountMovement,
   parseCompletedPayment,
+  parseInternalTransfer,
   parseMonimeWebhook,
-  PAYMENT_COMPLETED_EVENT,
+  parsePayout,
 } from '../domain/monime-webhook';
 import { type InboxEvent, WebhookInbox } from '../infrastructure/webhook-inbox';
 
@@ -40,6 +44,7 @@ export class MonimeWebhookReceiver {
     private readonly config: AppConfig,
     private readonly inbox: WebhookInbox,
     private readonly settle: SettlePaymentService,
+    private readonly treasury: TreasuryEventsService,
     private readonly dispatcher: OutboxDispatcher,
   ) {}
 
@@ -99,12 +104,22 @@ export class MonimeWebhookReceiver {
   }
 
   private dispatch(tx: Parameters<SettlePaymentService['applyCompleted']>[0], env: MonimeWebhookEnvelope): Promise<SettlementResult> {
+    const at = eventTime(env, new Date());
     switch (env.event.name) {
-      case PAYMENT_COMPLETED_EVENT:
-        return this.settle.applyCompleted(tx, { ...parseCompletedPayment(env), occurredAt: eventTime(env, new Date()) });
+      case MONIME_EVENTS.paymentCompleted:
+        return this.settle.applyCompleted(tx, { ...parseCompletedPayment(env), occurredAt: at });
+      case MONIME_EVENTS.transferCompleted:
+        return this.treasury.applyTransfer(tx, parseInternalTransfer(env), 'completed', at);
+      case MONIME_EVENTS.transferFailed:
+        return this.treasury.applyTransfer(tx, parseInternalTransfer(env), 'failed', at);
+      case MONIME_EVENTS.payoutCompleted:
+        return this.treasury.applyPayout(tx, parsePayout(env), 'completed', at);
+      case MONIME_EVENTS.payoutFailed:
+        return this.treasury.applyPayout(tx, parsePayout(env), 'failed', at);
+      case MONIME_EVENTS.accountCredited:
+      case MONIME_EVENTS.accountDebited:
+        return this.treasury.applyAccountMovement(tx, parseAccountMovement(env), at);
       default:
-        // TODO(monime): handle the commission-transfer completion/failure event once the
-        // transfer endpoint is confirmed (payout.completed / payout.failed or similar).
         return Promise.resolve({ outcome: 'IGNORED', note: `Unhandled event ${env.event.name}`, outboxKeys: [] });
     }
   }
