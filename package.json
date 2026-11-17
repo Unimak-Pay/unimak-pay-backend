@@ -21,7 +21,12 @@
     "db:reset": "prisma migrate reset --force",
     "channel": "tsx --env-file=.env scripts/channel.ts",
     "start:local": "tsc -p tsconfig.build.json && node --env-file=.env dist/src/main.js",
-    "build:watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+    "build:watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "monime:provision": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/provision-accounts.js",
+    "monime:balances": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/balances.js",
+    "monime:banks": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/banks.js",
+    "monime:register-webhook": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/register-webhook.js",
+    "monime:payout": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/payout.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -19,6 +19,7 @@ cp .env.example .env          # then set MONIME_WEBHOOK_SECRET etc.
 pnpm db:up                    # Postgres 16 on localhost:54329
 pnpm db:deploy                # apply migrations
 pnpm db:seed                  # fee types, 2026/27 fees, rate rules, pricing (idempotent)
+pnpm monime:provision         # one Monime financial account per fee type + platform (idempotent)
 pnpm start:local              # compiles with tsc, listens on PORT (3100 in .env.example)
 ```
 
@@ -45,7 +46,7 @@ against a non-local host unless `TEST_DATABASE_ADMIN_URL` is set explicitly.
 | Variable | `mock` | `http` |
 |---|---|---|
 | `PORTAL_MODE` | `MockPortalClient` reads `fixtures/portal/*.json` | `HttpPortalClient` → `PORTAL_BASE_URL` (1.5 s timeout) |
-| `MONIME_MODE` | `MockMonimeClient` records collections/transfers in `MockMonimeRecord` | `HttpMonimeClient` → `MONIME_BASE_URL` |
+| `MONIME_MODE` | `MockMonimeClient` keeps payment codes, accounts, transfers and payouts in `MockMonimeRecord` | `HttpMonimeClient` → `MONIME_BASE_URL` |
 
 Mock portal:
 
@@ -57,10 +58,49 @@ Mock portal:
 
 SMS goes to the console (`[SMS] → +232…`) in every mode for now.
 
-`HttpMonimeClient` uses the confirmed Monime transport (Bearer token,
-`Monime-Space-Id`, `Monime-Version: caph.2025-08-23`, `Idempotency-Key`, `{ success, result }`
-envelope, retries). The **collection** and **account-to-account transfer** endpoints
-are not confirmed yet: search for `TODO(monime)`.
+`HttpMonimeClient` follows Monime's caph.2025-08-23 OpenAPI spec (Bearer token,
+`Monime-Space-Id`, `Monime-Version`, `Idempotency-Key` ≤ 64 chars, `{ success, result }`
+envelope, retries on network/429/5xx with the same key). Request bodies are pinned by
+`http-monime.client.spec.ts`. One open question is marked `TODO(monime)`: the MSISDN
+format for `authorizedPhoneNumber` on payment codes.
+
+## Money flow in Monime
+
+```
+payer ──USSD payment code──▶ fee-type account (unimak-fee-app, -tuition, …)
+                                   │  internal transfer (platform commission, per payment)
+                                   ├──────────────────────────▶ platform account (unimak-platform)
+                                   │  payout (manual, payouts.manage)
+                                   └──────────────────────────▶ UNIMAK bank account
+```
+
+- **Financial accounts** (`pnpm monime:provision`): one per fee type plus the platform
+  account, created with a unique Monime `reference` (`unimak-fee-<code>`,
+  `unimak-platform`) so re-running never duplicates. A fee type can't be paid until its
+  account exists.
+- **Collections:** `POST /v1/payment-codes` (one-time, amount, duration = payment
+  expiry, `reference` = our payment id, `authorizedPhoneNumber` = payer, into the fee
+  type's account). `POST /v1/channel/payments` returns the `ussdCode` to dial.
+- **Commission:** after settlement, the outbox calls `POST /v1/internal-transfers` from
+  the fee-type account to the platform account (`Transfer` row, Idempotency-Key
+  `commission-<paymentId>`); completed/failed by webhook.
+- **Payouts** (`pnpm monime:payout`): withdraw to a bank (`GET /v1/banks` provider ids).
+  Needs `payouts.manage`; checks Monime's available balance minus our own unsubmitted
+  payouts under a row lock; `POST /v1/payouts` with Idempotency-Key = payout id;
+  completed/failed by webhook (fees recorded).
+
+### CLI
+
+| Command | |
+|---|---|
+| `pnpm monime:provision` | create/link financial accounts (safe to re-run) |
+| `pnpm monime:balances` | refresh and print available balances |
+| `pnpm monime:banks [SL]` | bank provider ids for payouts |
+| `pnpm monime:payout --account unimak-fee-tuition --amount 150000 --bank slb001 --account-number 0123456789 [--name …] [--narration …] [--key …] --confirm` | withdraw (dry run without `--confirm`; same `--key` never pays twice) |
+| `pnpm monime:register-webhook https://<domain>/webhooks/monime` | subscribe our endpoint (HS256 with `MONIME_WEBHOOK_SECRET`) |
+
+They read `.env` if present; point them at production by exporting the production
+variables instead.
 
 ## Simulate a payment end to end
 
@@ -80,6 +120,7 @@ pnpm channel POST /v1/channel/payments \
 curl -XPOST localhost:3100/dev/monime/simulate-webhook -H 'content-type: application/json' \
   -d '{"paymentId":"<paymentId>","outcome":"completed"}'
 #    outcome: completed | failed | expired; optional "amount" (test mismatches), "eventId" (test redelivery)
+#    also {"transferId": …} (commission transfer) and {"payoutId": …} with completed | failed
 
 # 4. Check the result
 pnpm channel GET /v1/channel/payments/<paymentId>
@@ -88,10 +129,12 @@ open "http://localhost:3100/r/<verifyCode>"           # link is in the SMS log l
 cat fixtures/portal/notifications.log.json            # portal.application_paid
 ```
 
-`completed` builds a realistic `payment.processing_completed` event, signs it with
-`MONIME_WEBHOOK_SECRET` and runs it through the same receiver as `POST /webhooks/monime`.
-Monime sends no payment-failed webhook, so `failed`/`expired` mark the mock collection
-and close our payment through reconciliation (`getPayment` polling).
+The simulator moves the mock Monime object to its final state, builds the matching
+event (`payment.processing_completed`, `internal_transfer.*`, `payout.*`), signs it
+with `MONIME_WEBHOOK_SECRET` and runs it through the same receiver as
+`POST /webhooks/monime`. For payments, `failed`/`expired` cancel/expire the mock payment
+code and close our payment through reconciliation (we don't subscribe to
+`payment_code.*`).
 
 ## API
 
@@ -124,9 +167,17 @@ include a `display` string. Errors: `{ "error": { "code", "message", "details" }
 Monime-Signature: t=<timestamp>,v1=<base64(HMAC-SHA256(MONIME_WEBHOOK_SECRET, "<t>_" + raw body))>
 ```
 
-Envelope `{ apiVersion, event: { id, name, timestamp }, object, data }`. Handled:
-`payment.processing_completed` (matched by our payment id in `reference` / `metadata.paymentId`,
-then the owner / Monime ids). Other events are stored and acknowledged as `IGNORED`.
+Envelope `{ apiVersion, event: { id, name, timestamp (unix s) }, object, data }`.
+
+| Event | Effect |
+|---|---|
+| `payment.processing_completed` | settle the payment (matched by our id in `reference` / `metadata.paymentId`, then the payment code in `ownershipGraph.owner`) |
+| `internal_transfer.completed` / `.failed` | commission `Transfer` → COMPLETED / FAILED (+ failure code) |
+| `payout.completed` / `.failed` | `Payout` → COMPLETED (+ fees) / FAILED (+ failure code) |
+| `financial_account.credited` / `.debited` | refresh the cached balance of our account (payload undocumented by Monime: best effort) |
+
+Anything else is stored and acknowledged as `IGNORED`. Register with
+`pnpm monime:register-webhook` (subscribes all of the above).
 
 Every delivery goes through an inbox keyed by `event.id` (`WebhookEvent`): redeliveries
 return `DUPLICATE`; amount/currency mismatches or a second payment for a settled one are
@@ -157,6 +208,7 @@ Minimal HTML receipt check (masked name, amount, fee, date). `noindex`, `no-stor
 | Initiate under `SELECT … FOR UPDATE` on the obligation | `payments/application/initiate-payment.use-case.ts` |
 | Settlement: ledger PAYMENT + receipt + outbox in one tx | `payments/application/settle-payment.service.ts` |
 | Outbox backoff 1m, 5m, 30m, 2h, 12h → DEAD | `outbox/domain/retry.ts` |
+| Payouts: `payouts.manage`, available − unsubmitted ≥ amount | `treasury/domain/payout-policy.ts` |
 
 Ledger rows are append-only (DB trigger) with sign checks; the payment split is checked
 by a DB constraint (`net = amount − monimeFee − platformFee`).
@@ -182,6 +234,7 @@ src/
     integrations/    PortalClient, MonimeClient, SmsSender ports + mock/http adapters
     channel-api/     /v1/channel controllers, HMAC guard, public receipt page
     webhooks/        Monime signature, envelope parsing, inbox, receiver
+    treasury/        financial accounts, commission transfers, payouts
     cron/            outbox sweep, payment expiry
     dev/             /dev/monime/simulate-webhook (non-production only)
     admin-api/       stub (next phase)
@@ -199,8 +252,10 @@ routes every 5 minutes (sub-daily crons need a Pro plan).
 Set on Vercel: `DATABASE_URL` (Supabase transaction pooler,
 `?pgbouncer=true&connection_limit=1`), `DIRECT_URL` (direct, for migrations),
 `NODE_ENV=production`, `PUBLIC_BASE_URL`, the Monime and portal settings,
-`MONIME_WEBHOOK_SECRET`, `PLATFORM_MONIME_ACCOUNT`, `CHANNEL_CLIENTS`, `CRON_SECRET`.
-Run `pnpm db:deploy` with `DIRECT_URL` before deploying a new migration.
+`MONIME_WEBHOOK_SECRET` (32–256 chars), `CHANNEL_CLIENTS`, `CRON_SECRET`.
+Run `pnpm db:deploy` with `DIRECT_URL` before deploying a new migration, then
+`pnpm monime:provision` and `pnpm monime:register-webhook https://<domain>/webhooks/monime`
+once per environment.
 
 Not yet verified on a real deployment: Prisma engine bundling under pnpm
 (`includeFiles` in `vercel.json`) and that rewrites preserve the original path for cron routes.
