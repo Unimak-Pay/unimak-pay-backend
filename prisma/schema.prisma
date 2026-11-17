@@ -1,0 +1,327 @@
+// UNIMAK fee collection — system of record for money.
+// All money columns are BigInt in SLE minor units (1 SLE = 100). SLE only.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum PayerKind {
+  APPLICANT
+  STUDENT
+}
+
+enum Recurrence {
+  ONCE
+  PER_YEAR
+}
+
+enum Residency {
+  LOCAL
+  INTERNATIONAL
+}
+
+enum FeeStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+enum ObligationStatus {
+  OPEN
+  PAID
+}
+
+enum LedgerEntryType {
+  CHARGE
+  PAYMENT
+  ADJUSTMENT
+  REFUND
+}
+
+enum Channel {
+  USSD
+  DOTS
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum OutboxStatus {
+  PENDING
+  SENT
+  DEAD
+}
+
+// ───────────────────────────── Catalog ─────────────────────────────
+
+model FeeType {
+  id                String     @id @default(uuid()) @db.Uuid
+  /// APP, MATRIC, TUITION, DEPT, GRAD or a custom code
+  code              String     @unique
+  name              String
+  payerKind         PayerKind
+  recurrence        Recurrence
+  /// Monime financial account that receives collections for this fee type
+  settlementAccount String
+  createdAt         DateTime   @default(now())
+
+  fees Fee[]
+}
+
+model Fee {
+  id                   String    @id @default(uuid()) @db.Uuid
+  feeTypeId            String    @db.Uuid
+  name                 String
+  /// "2026/27" for academic-year fees, "2026-SEP" for intake-based fees
+  period               String
+  allowInstalments     Boolean   @default(false)
+  defaultMinInstalment BigInt?
+  dueDate              DateTime?
+  status               FeeStatus @default(DRAFT)
+  createdAt            DateTime  @default(now())
+
+  feeType          FeeType           @relation(fields: [feeTypeId], references: [id])
+  rateRules        RateRule[]
+  instalmentRules  InstalmentRule[]
+  eligibilityRules EligibilityRule[]
+  obligations      Obligation[]
+
+  @@unique([feeTypeId, period])
+  @@index([status])
+}
+
+model RateRule {
+  id          String     @id @default(uuid()) @db.Uuid
+  feeId       String     @db.Uuid
+  programCode String?
+  department  String?
+  level       Int?
+  residency   Residency?
+  intake      String?
+  amount      BigInt
+  createdAt   DateTime   @default(now())
+
+  fee Fee @relation(fields: [feeId], references: [id])
+
+  @@index([feeId])
+}
+
+model InstalmentRule {
+  id            String   @id @default(uuid()) @db.Uuid
+  feeId         String   @db.Uuid
+  programCode   String
+  minInstalment BigInt
+  updatedBy     String
+  updatedAt     DateTime @updatedAt
+
+  fee Fee @relation(fields: [feeId], references: [id])
+
+  @@unique([feeId, programCode])
+}
+
+model EligibilityRule {
+  id          String     @id @default(uuid()) @db.Uuid
+  feeId       String     @db.Uuid
+  programCode String?
+  department  String?
+  level       Int?
+  residency   Residency?
+  intake      String?
+  finalYear   Boolean?
+
+  fee Fee @relation(fields: [feeId], references: [id])
+
+  @@index([feeId])
+}
+
+model PricingConfig {
+  id            String   @id @default(uuid()) @db.Uuid
+  channel       Channel
+  /// Total UNIMAK gives up, in basis points (250 = 2.5%)
+  totalRateBps  Int
+  /// Monime's share: percentage part (bps) + flat part (minor units)
+  monimeRateBps Int      @default(0)
+  monimeFlat    BigInt   @default(0)
+  effectiveFrom DateTime
+
+  payments Payment[]
+
+  @@unique([channel, effectiveFrom])
+}
+
+// ───────────────────────────── Payers & obligations ─────────────────────────────
+
+model Payer {
+  id              String     @id @default(uuid()) @db.Uuid
+  kind            PayerKind
+  /// applicationRef for applicants, studentId for students
+  ref             String
+  fullName        String
+  phone           String
+  programCode     String
+  department      String?
+  level           Int?
+  finalYear       Boolean?
+  residency       Residency
+  intake          String
+  applicantStatus String?
+  snapshotAt      DateTime
+
+  obligations Obligation[]
+  receipts    Receipt[]
+
+  @@unique([kind, ref])
+}
+
+model Obligation {
+  id        String           @id @default(uuid()) @db.Uuid
+  payerId   String           @db.Uuid
+  feeId     String           @db.Uuid
+  /// copied from the best-matching rate rule at creation
+  amount    BigInt
+  rateRuleId String?         @db.Uuid
+  status    ObligationStatus @default(OPEN)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  payer    Payer         @relation(fields: [payerId], references: [id])
+  fee      Fee           @relation(fields: [feeId], references: [id])
+  entries  LedgerEntry[]
+  payments Payment[]
+  receipts Receipt[]
+
+  @@unique([payerId, feeId])
+}
+
+/// Append-only (UPDATE/DELETE blocked by trigger). Signed amount:
+/// CHARGE > 0 (owed), PAYMENT < 0, REFUND > 0, ADJUSTMENT either way.
+/// balance = SUM(amount).
+model LedgerEntry {
+  id           String          @id @default(uuid()) @db.Uuid
+  obligationId String          @db.Uuid
+  type         LedgerEntryType
+  amount       BigInt
+  paymentId    String?         @unique @db.Uuid
+  memo         String?
+  createdBy    String
+  createdAt    DateTime        @default(now())
+
+  obligation Obligation @relation(fields: [obligationId], references: [id])
+  payment    Payment?   @relation(fields: [paymentId], references: [id])
+
+  @@index([obligationId])
+}
+
+// ───────────────────────────── Payments ─────────────────────────────
+
+model Payment {
+  id              String        @id @default(uuid()) @db.Uuid
+  obligationId    String        @db.Uuid
+  amount          BigInt
+  channel         Channel
+  /// channel API client that created it (idempotency scope)
+  clientId        String
+  idempotencyKey  String
+  payerPhone      String
+  status          PaymentStatus @default(INITIATED)
+  /// Monime-side reference for the collection
+  monimeRef       String?       @unique
+  pricingConfigId String        @db.Uuid
+  monimeFee       BigInt
+  platformFee     BigInt
+  netAmount       BigInt
+  expiresAt       DateTime
+  completedAt     DateTime?
+  failureReason   String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  obligation    Obligation    @relation(fields: [obligationId], references: [id])
+  pricingConfig PricingConfig @relation(fields: [pricingConfigId], references: [id])
+  ledgerEntry   LedgerEntry?
+  receipt       Receipt?
+
+  @@unique([clientId, idempotencyKey])
+  @@index([obligationId, status])
+  @@index([status, expiresAt])
+}
+
+model WebhookEvent {
+  /// Monime event id — primary key gives dedupe for free
+  id          String    @id
+  type        String
+  payload     Json
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+}
+
+// ───────────────────────────── Receipts ─────────────────────────────
+
+model Receipt {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// UNIMAK-YYYY-NNNNNN
+  number       String   @unique
+  verifyCode   String   @unique
+  paymentId    String   @unique @db.Uuid
+  payerId      String   @db.Uuid
+  obligationId String   @db.Uuid
+  amount       BigInt
+  issuedAt     DateTime @default(now())
+
+  payment    Payment    @relation(fields: [paymentId], references: [id])
+  payer      Payer      @relation(fields: [payerId], references: [id])
+  obligation Obligation @relation(fields: [obligationId], references: [id])
+
+  @@index([payerId])
+}
+
+model ReceiptCounter {
+  year Int @id
+  last Int @default(0)
+}
+
+// ───────────────────────────── Outbox ─────────────────────────────
+
+model OutboxMessage {
+  id            String       @id @default(uuid()) @db.Uuid
+  /// sms.receipt | portal.application_paid | monime.commission_transfer
+  type          String
+  /// idempotency: e.g. "monime.commission_transfer:<paymentId>"
+  dedupeKey     String       @unique
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  nextAttemptAt DateTime     @default(now())
+  lockedUntil   DateTime?
+  lastError     String?
+  createdAt     DateTime     @default(now())
+  sentAt        DateTime?
+
+  @@index([status, nextAttemptAt])
+}
+
+// ───────────────────────────── Dev-only mocks ─────────────────────────────
+
+/// Backs MockMonimeClient (MONIME_MODE=mock). Unused in http mode.
+model MockMonimeRecord {
+  id        String   @id
+  kind      String // COLLECTION | TRANSFER
+  status    String
+  amount    BigInt
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

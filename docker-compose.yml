@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:16-alpine
+    network_mode: bridge  # avoids creating a new network (host address pools can be exhausted)
+    environment:
+      POSTGRES_USER: unimak
+      POSTGRES_PASSWORD: unimak
+      POSTGRES_DB: unimak
+    ports:
+      - "54329:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unimak"]
+      interval: 2s
+      retries: 20
+volumes:
+  pgdata:
