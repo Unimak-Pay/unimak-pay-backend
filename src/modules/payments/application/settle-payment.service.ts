@@ -5,37 +5,52 @@ import type { Db } from '../../../shared/infrastructure/prisma.service';
 import { APPLICATION_FEE_CODE } from '../../catalog/domain/fee';
 import { LEDGER_REPOSITORY, type LedgerRepository } from '../../ledger/application/ledger.repository';
 import { computePosition } from '../../ledger/domain/position';
-import type { OutboxMessageInput } from '../../outbox/domain/messages';
 import { OutboxWriter } from '../../outbox/application/outbox-writer';
+import type { OutboxMessageInput } from '../../outbox/domain/messages';
 import { ReceiptIssuer } from '../../receipts/application/receipt-issuer';
 import { receiptSmsText } from '../../receipts/application/receipt-sms';
 import { canTransition, isLateSettlement } from '../domain/payment-status';
 import { PAYMENT_REPOSITORY, type PaymentRecord, type PaymentRepository } from './payment.repository';
 
-/** Normalized outcome of a Monime payment event (adapter-independent). */
-export interface PaymentOutcome {
-  /** our payment id, if Monime echoes it back */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Where our payment id may come back in a Monime Payment. */
+const PAYMENT_ID_METADATA_KEYS = ['paymentId', 'unimakPaymentId'];
+
+/** A completed Monime Payment, already parsed from the webhook. */
+export interface CompletedMonimePayment {
+  monimePaymentId: string;
+  financialAccountId: string | null;
+  currency: string;
+  amount: Minor;
+  /** sum of Monime fees on the payment (informational) */
+  fees: Minor;
   reference: string | null;
-  monimeRef: string | null;
-  status: 'COMPLETED' | 'FAILED' | 'EXPIRED';
-  /** amount Monime says it collected (minor units), when known */
-  amount: Minor | null;
+  /** payment metadata merged over its owner's (e.g. payment code / checkout) */
+  metadata: Record<string, string>;
+  /** the object that owns the payment — normally what we created at initiation */
+  ownerId: string | null;
   occurredAt: Date;
-  reason?: string;
 }
 
-export type SettlementResult =
-  | { kind: 'settled'; paymentId: string; receiptNumber: string; outboxKeys: string[]; late: boolean }
-  | { kind: 'closed'; paymentId: string; status: 'FAILED' | 'EXPIRED' }
-  | { kind: 'noop'; paymentId: string | null; reason: string };
+export type SettlementOutcome = 'PROCESSED' | 'IGNORED' | 'UNMATCHED';
 
-export class SettlementError extends Error {}
+export interface SettlementResult {
+  outcome: SettlementOutcome;
+  note?: string;
+  paymentId?: string;
+  receiptNumber?: string;
+  /** outbox messages written; dispatch them after commit */
+  outboxKeys: string[];
+}
 
 /**
- * Applies a payment outcome inside the caller's transaction:
- * COMPLETED → payment row, ledger PAYMENT (unique on paymentId), obligation
- * status, receipt, and outbox (sms.receipt, portal.application_paid for APP,
- * monime.commission_transfer when platformFee > 0).
+ * Applies payment.processing_completed inside the caller's transaction.
+ * Only this path marks a payment COMPLETED. In one transaction:
+ *   payment → COMPLETED, ledger PAYMENT (unique on paymentId), obligation PAID if
+ *   cleared, receipt, outbox (sms.receipt, portal.application_paid for APP,
+ *   monime.commission_transfer when platformFee > 0).
+ * Business mismatches don't throw: they come back UNMATCHED with a note for
+ * reconciliation (Monime gets 200 and stops redelivering).
  */
 @Injectable()
 export class SettlePaymentService {
@@ -49,39 +64,65 @@ export class SettlePaymentService {
     @Inject(LEDGER_REPOSITORY) private readonly ledger: LedgerRepository,
   ) {}
 
-  async apply(tx: Db, outcome: PaymentOutcome): Promise<SettlementResult> {
-    const found = await this.find(tx, outcome);
-    if (!found) return { kind: 'noop', paymentId: null, reason: 'unknown payment' };
+  async applyCompleted(tx: Db, ev: CompletedMonimePayment): Promise<SettlementResult> {
+    const found = await this.match(tx, ev);
+    if (!found) return { outcome: 'IGNORED', note: 'Not a UNIMAK payment', outboxKeys: [] };
     const p = (await this.payments.lockPayment(found.id, tx))!;
+    const base = { paymentId: p.id, outboxKeys: [] as string[] };
 
-    if (p.status === outcome.status) return { kind: 'noop', paymentId: p.id, reason: 'already applied' };
-    if (!canTransition(p.status, outcome.status)) {
-      return { kind: 'noop', paymentId: p.id, reason: `ignored ${p.status} → ${outcome.status}` };
+    if (p.status === 'COMPLETED') {
+      if (!p.monimePaymentId || p.monimePaymentId === ev.monimePaymentId) {
+        return { ...base, outcome: 'PROCESSED', note: 'Payment already applied' };
+      }
+      return {
+        ...base,
+        outcome: 'UNMATCHED',
+        note: `Second Monime payment ${ev.monimePaymentId} for a payment already settled by ${p.monimePaymentId} (possible double charge)`,
+      };
+    }
+    if (ev.currency !== 'SLE') {
+      return { ...base, outcome: 'UNMATCHED', note: `Payment in ${ev.currency}, expected SLE` };
+    }
+    if (ev.amount !== p.amount) {
+      return { ...base, outcome: 'UNMATCHED', note: `Monime collected ${ev.amount}, payment was for ${p.amount}` };
+    }
+    if (!canTransition(p.status, 'COMPLETED')) {
+      return { ...base, outcome: 'UNMATCHED', note: `Payment is ${p.status}` };
     }
 
-    if (outcome.status !== 'COMPLETED') {
-      await this.payments.update(p.id, { status: outcome.status, failureReason: outcome.reason ?? outcome.status.toLowerCase() }, tx);
-      return { kind: 'closed', paymentId: p.id, status: outcome.status };
+    const notes: string[] = [];
+    if (isLateSettlement(p.status)) {
+      notes.push(`Late settlement: payment was ${p.status}`);
+      this.logger.warn(`Late settlement of payment ${p.id} (was ${p.status})`);
     }
+    if (ev.fees !== p.monimeFee) notes.push(`Monime fees ${ev.fees}, we computed ${p.monimeFee}`);
 
-    if (outcome.amount !== null && outcome.amount !== p.amount) {
-      // Never guess with money: leave it for reconciliation.
-      throw new SettlementError(`Amount mismatch for payment ${p.id}: ours ${p.amount}, Monime ${outcome.amount}`);
+    const settled = await this.complete(tx, p, ev);
+    if (ev.financialAccountId && ev.financialAccountId !== settled.settlementAccount) {
+      notes.push(`Credited to ${ev.financialAccountId}, expected ${settled.settlementAccount}`);
     }
-    const late = isLateSettlement(p.status);
-    if (late) this.logger.warn(`Late settlement: payment ${p.id} was ${p.status}, Monime says COMPLETED`);
-    return this.complete(tx, p, outcome, late);
+    return {
+      outcome: 'PROCESSED',
+      note: notes.length ? notes.join('; ') : undefined,
+      paymentId: p.id,
+      receiptNumber: settled.receiptNumber,
+      outboxKeys: settled.outboxKeys,
+    };
   }
 
-  private async complete(tx: Db, p: PaymentRecord, outcome: PaymentOutcome, late: boolean): Promise<SettlementResult> {
-    const completedAt = outcome.occurredAt;
+  private async complete(
+    tx: Db,
+    p: PaymentRecord,
+    ev: CompletedMonimePayment,
+  ): Promise<{ receiptNumber: string; outboxKeys: string[]; settlementAccount: string }> {
+    const completedAt = ev.occurredAt;
     await this.payments.update(
       p.id,
-      { status: 'COMPLETED', completedAt, monimeRef: p.monimeRef ?? outcome.monimeRef, failureReason: null },
+      { status: 'COMPLETED', completedAt, monimePaymentId: ev.monimePaymentId, failureReason: null },
       tx,
     );
     await this.ledger.append(
-      { obligationId: p.obligationId, type: 'PAYMENT', amount: -p.amount, paymentId: p.id, memo: `monime ${outcome.monimeRef ?? ''}`.trim(), createdBy: 'system:monime-webhook' },
+      { obligationId: p.obligationId, type: 'PAYMENT', amount: -p.amount, paymentId: p.id, memo: `monime ${ev.monimePaymentId}`, createdBy: 'system:monime-webhook' },
       tx,
     );
 
@@ -125,15 +166,25 @@ export class SettlePaymentService {
       });
     }
     const outboxKeys = await this.outbox.enqueue(tx, messages);
-    return { kind: 'settled', paymentId: p.id, receiptNumber: receipt.number, outboxKeys, late };
+    return { receiptNumber: receipt.number, outboxKeys, settlementAccount: o.settlementAccount };
   }
 
-  private async find(tx: Db, o: PaymentOutcome): Promise<PaymentRecord | null> {
-    if (o.monimeRef) {
-      const byRef = await this.payments.byMonimeRef(o.monimeRef, tx);
-      if (byRef) return byRef;
+  /** Our payment id (reference / metadata) first, then the Monime object ids. */
+  private async match(tx: Db, ev: CompletedMonimePayment): Promise<PaymentRecord | null> {
+    const ids = new Set(
+      [...PAYMENT_ID_METADATA_KEYS.map((k) => ev.metadata[k]), ev.reference].filter(
+        (v): v is string => typeof v === 'string' && UUID.test(v),
+      ),
+    );
+    for (const id of ids) {
+      const p = await this.payments.byId(id, tx);
+      if (p) return p;
     }
-    if (o.reference && /^[0-9a-f-]{36}$/i.test(o.reference)) return this.payments.byId(o.reference, tx);
-    return null;
+    for (const ref of [ev.ownerId, ev.monimePaymentId]) {
+      if (!ref) continue;
+      const p = await this.payments.byMonimeRef(ref, tx);
+      if (p) return p;
+    }
+    return this.payments.byMonimePaymentId(ev.monimePaymentId, tx);
   }
 }

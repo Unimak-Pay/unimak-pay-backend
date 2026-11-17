@@ -15,6 +15,7 @@ export interface PaymentRecord {
   payerPhone: string;
   status: PaymentStatus;
   monimeRef: string | null;
+  monimePaymentId: string | null;
   pricingConfigId: string;
   monimeFee: Minor;
   platformFee: Minor;
@@ -60,6 +61,7 @@ export interface LockedObligation {
 export interface PaymentRepository {
   byId(id: string, db?: Db): Promise<PaymentRecord | null>;
   byMonimeRef(ref: string, db?: Db): Promise<PaymentRecord | null>;
+  byMonimePaymentId(id: string, db?: Db): Promise<PaymentRecord | null>;
   byIdempotencyKey(clientId: string, key: string, db?: Db): Promise<PaymentRecord | null>;
   /** SELECT ... FOR UPDATE on the obligation (+ fee/payer info). */
   lockObligation(obligationId: string, db: Db): Promise<LockedObligation | null>;
@@ -68,7 +70,7 @@ export interface PaymentRepository {
   create(p: NewPayment, db: Db): Promise<PaymentRecord>;
   update(
     id: string,
-    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'completedAt' | 'failureReason'>>,
+    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'monimePaymentId' | 'completedAt' | 'failureReason'>>,
     db?: Db,
   ): Promise<PaymentRecord>;
   /** Marks open payments past expiry as EXPIRED. Returns count. */

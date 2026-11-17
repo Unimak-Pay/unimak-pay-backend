@@ -238,8 +238,10 @@ model Payment {
   idempotencyKey  String
   payerPhone      String
   status          PaymentStatus @default(INITIATED)
-  /// Monime-side reference for the collection
+  /// Monime-side id of what we created at initiation (collection / payment code)
   monimeRef       String?       @unique
+  /// Monime Payment id (spm-…) from payment.processing_completed
+  monimePaymentId String?       @unique
   pricingConfigId String        @db.Uuid
   monimeFee       BigInt
   platformFee     BigInt
@@ -260,13 +262,28 @@ model Payment {
   @@index([status, expiresAt])
 }
 
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  UNMATCHED
+  FAILED
+}
+
+/// Inbox for Monime webhook deliveries. The Monime event id is the dedupe key;
+/// PROCESSED / IGNORED / UNMATCHED are final, FAILED is retried by Monime.
 model WebhookEvent {
-  /// Monime event id — primary key gives dedupe for free
-  id          String    @id
-  type        String
+  id          String             @id @db.VarChar(100)
+  type        String             @db.VarChar(100)
   payload     Json
-  receivedAt  DateTime  @default(now())
+  status      WebhookEventStatus @default(RECEIVED)
+  attempts    Int                @default(0)
+  /// failure message or outcome note (e.g. why UNMATCHED)
+  error       String?
+  receivedAt  DateTime           @default(now())
   processedAt DateTime?
+
+  @@index([status])
 }
 
 // ───────────────────────────── Receipts ─────────────────────────────

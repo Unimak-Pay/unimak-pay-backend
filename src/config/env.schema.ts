@@ -58,13 +58,16 @@ export class EnvSchema {
   @IsIn(ADAPTER_MODES)
   MONIME_MODE: (typeof ADAPTER_MODES)[number] = 'mock';
 
+  /** Includes the API version path. */
   @IsUrl({ require_tld: false })
-  @IsOptional()
-  MONIME_BASE_URL?: string;
+  MONIME_BASE_URL = 'https://api.monime.io/v1';
 
   @IsString()
   @IsOptional()
-  MONIME_API_KEY?: string;
+  MONIME_ACCESS_TOKEN?: string;
+
+  @IsString()
+  MONIME_API_VERSION = 'caph.2025-08-23';
 
   @IsString()
   @IsOptional()
@@ -73,6 +76,17 @@ export class EnvSchema {
   @IsString()
   @MinLength(16)
   MONIME_WEBHOOK_SECRET!: string;
+
+  /**
+   * Reject webhook signatures whose t= is further than this from now. Unset by
+   * default: Monime redeliveries may carry the original timestamp, and replays
+   * are harmless anyway (deduped by event id).
+   */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  MONIME_WEBHOOK_TOLERANCE_SECONDS?: number;
 
   /** Monime financial account that receives the platform commission. */
   @IsString()
@@ -111,9 +125,9 @@ export function validateEnv(raw: Record<string, unknown>): EnvSchema {
   if (env.PORTAL_MODE === 'http' && !env.PORTAL_BASE_URL) {
     throw new Error('Invalid environment:\n  PORTAL_BASE_URL is required when PORTAL_MODE=http');
   }
-  if (env.MONIME_MODE === 'http' && (!env.MONIME_BASE_URL || !env.MONIME_API_KEY)) {
+  if (env.MONIME_MODE === 'http' && (!env.MONIME_ACCESS_TOKEN || !env.MONIME_SPACE_ID)) {
     throw new Error(
-      'Invalid environment:\n  MONIME_BASE_URL and MONIME_API_KEY are required when MONIME_MODE=http',
+      'Invalid environment:\n  MONIME_ACCESS_TOKEN and MONIME_SPACE_ID are required when MONIME_MODE=http',
     );
   }
   return env;

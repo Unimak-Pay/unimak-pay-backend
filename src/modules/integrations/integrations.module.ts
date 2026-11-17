@@ -26,11 +26,12 @@ import { SMS_SENDER } from './sms/sms.port';
       inject: [AppConfig, PrismaService],
       useFactory: (cfg: AppConfig, prisma: PrismaService) =>
         cfg.get('MONIME_MODE') === 'http'
-          ? new HttpMonimeClient(
-              cfg.get('MONIME_BASE_URL')!,
-              cfg.get('MONIME_API_KEY')!,
-              cfg.get('MONIME_SPACE_ID'),
-            )
+          ? new HttpMonimeClient({
+              baseUrl: cfg.get('MONIME_BASE_URL'),
+              accessToken: cfg.get('MONIME_ACCESS_TOKEN')!,
+              spaceId: cfg.get('MONIME_SPACE_ID')!,
+              apiVersion: cfg.get('MONIME_API_VERSION'),
+            })
           : new MockMonimeClient(prisma),
     },
     // TODO: real SMS provider adapter; console sender in all environments for now.
