@@ -37,8 +37,10 @@ export class OutboxDispatcher {
   async dispatchKeys(dedupeKeys: readonly string[]): Promise<DispatchSummary> {
     if (dedupeKeys.length === 0) return { claimed: 0, sent: 0, retried: 0, dead: 0 };
     try {
+      // Fresh messages we just wrote: no due-time check, so app/DB clock skew
+      // can't make them look "not yet due" and defer them to the sweep.
       return await this.run(
-        Prisma.sql`"dedupeKey" = ANY(${[...dedupeKeys]}::text[])`,
+        Prisma.sql`"dedupeKey" = ANY(${[...dedupeKeys]}::text[]) AND attempts = 0`,
         dedupeKeys.length,
       );
     } catch (err) {
@@ -49,7 +51,7 @@ export class OutboxDispatcher {
 
   /** Cron sweep: everything due. */
   sweep(limit = 50): Promise<DispatchSummary> {
-    return this.run(Prisma.sql`TRUE`, limit);
+    return this.run(Prisma.sql`"nextAttemptAt" <= now()`, limit);
   }
 
   private async run(filter: Prisma.Sql, limit: number): Promise<DispatchSummary> {
@@ -58,7 +60,7 @@ export class OutboxDispatcher {
       UPDATE "OutboxMessage" SET "lockedUntil" = now() + ${LEASE}
       WHERE id IN (
         SELECT id FROM "OutboxMessage"
-        WHERE status = 'PENDING' AND "nextAttemptAt" <= now()
+        WHERE status = 'PENDING'
           AND ("lockedUntil" IS NULL OR "lockedUntil" < now())
           AND ${filter}
         ORDER BY "nextAttemptAt"
