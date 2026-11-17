@@ -5,6 +5,7 @@
     "moduleResolution": "node16",
     "lib": ["ES2023"],
     "strict": true,
+    "isolatedModules": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
