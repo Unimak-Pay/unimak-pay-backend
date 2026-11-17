@@ -1,4 +1,4 @@
-import { mkdtempSync, cpSync, readFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { MockPortalClient } from './mock-portal.client';
@@ -7,6 +7,7 @@ import { PortalError } from './portal.port';
 describe('MockPortalClient', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'portal-'));
   cpSync(path.resolve('fixtures/portal'), dir, { recursive: true });
+  writeFileSync(path.join(dir, 'notifications.log.json'), '[]'); // ignore whatever the dev log holds
   const client = new MockPortalClient(dir, 0);
 
   it('finds applicants and students', async () => {

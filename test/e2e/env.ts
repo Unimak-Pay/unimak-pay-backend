@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync } from 'node:fs';
+import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { TEST_CLIENT, TEST_CRON_SECRET, TEST_WEBHOOK_SECRET } from './test-env';
@@ -9,6 +9,7 @@ if (!TEST_DATABASE_URL) throw new Error('E2E_DATABASE_URL not set (global setup 
 // Each test file gets its own copy of the portal fixtures (notifyPayment writes to it).
 const fixtures = mkdtempSync(path.join(os.tmpdir(), 'unimak-portal-'));
 cpSync(path.resolve(__dirname, '../../fixtures/portal'), fixtures, { recursive: true });
+writeFileSync(path.join(fixtures, 'notifications.log.json'), '[]');
 
 Object.assign(process.env, {
   NODE_ENV: 'test',
