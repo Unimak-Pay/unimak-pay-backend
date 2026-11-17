@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm build",
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 60,
+      "includeFiles": "{dist/**,fixtures/**,node_modules/.prisma/client/**,node_modules/.pnpm/@prisma+client*/node_modules/.prisma/client/**}"
+    }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
+  "crons": [
+    { "path": "/cron/outbox", "schedule": "*/5 * * * *" },
+    { "path": "/cron/expire-payments", "schedule": "*/5 * * * *" }
+  ]
+}

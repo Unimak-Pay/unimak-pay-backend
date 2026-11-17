@@ -10,7 +10,7 @@
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.build.json",
     "start": "node dist/src/main.js",
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsc -p tsconfig.build.json && node --env-file=.env --watch-path=dist dist/src/main.js",
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:e2e": "jest --config test/jest-e2e.json --runInBand",
@@ -18,7 +18,10 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
-    "db:reset": "prisma migrate reset --force"
+    "db:reset": "prisma migrate reset --force",
+    "channel": "tsx --env-file=.env scripts/channel.ts",
+    "start:local": "tsc -p tsconfig.build.json && node --env-file=.env dist/src/main.js",
+    "build:watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

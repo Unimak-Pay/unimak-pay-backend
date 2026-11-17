@@ -19,5 +19,5 @@
     "rootDir": ".",
     "types": ["node", "jest"]
   },
-  "include": ["src", "test", "prisma", "api"]
+  "include": ["src", "test", "prisma", "scripts"]
 }
