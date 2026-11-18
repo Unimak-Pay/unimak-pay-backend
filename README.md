@@ -144,7 +144,7 @@ There are four API surfaces, each with its own protection:
 
 | Surface | Who calls it | Protection |
 |---|---|---|
-| `POST /v1/ussd/exchange/<token>` | Monime USSD flow | RSA-OAEP + AES-128-GCM (our key pair), secret path token, optional IP allowlist |
+| `POST /v1/ussd/exchange/<token>` | Monime USSD flow (HTTPS domain) | RSA-OAEP + AES-128-GCM (our key pair), secret path token |
 | `/v1/channel/*` | Dash Dots (and other server-to-server clients) | API key + HMAC over timestamp + body |
 | `/v1/admin/*` | Admin portal | Supabase Auth access token + role/permission guard, 2FA for bursar & super admin |
 | `/webhooks/monime`, `/r/:code` | Monime / anyone | Monime HMAC signature / public read-only |
@@ -160,23 +160,48 @@ HTTP 200 within 10 s.
 Monime's docs state these requests **are not signed**: decrypting proves the sender has
 our public key, not that it is Monime. So the endpoint also:
 
-- lives behind a secret path token (wrong token → 404) and an optional `USSD_ALLOWED_IPS` allowlist;
+- lives behind a secret path token on our HTTPS domain (wrong token → 404);
 - keeps the session state server-side (`UssdSession`); a page is only accepted when the
   session expects it, so `flowData` can't skip to "confirm payment";
 - re-validates every input against our records (menu values, min/max amount);
-- accepts an exported phone number only if `uuidv5(msisdn, URL) == global.subscriberId`
-  (how Monime derives `subscriberId`);
 - rate-limits ID lookups per subscriber (`USSD_MAX_LOOKUPS_PER_15_MIN`) and masks names.
 
-A payment started here still has to be approved by the payer on their phone (Monime
-payment code), so the worst a forged request can do is create an unpaid code.
+The money itself is collected by Monime's `collect_payment` template, which the payer
+authorises with their mobile-money PIN, so a forged request can at most create an
+unpaid hold that expires after 15 minutes.
 
-**Flow:** `start → main_menu → id_type → enter_id → confirm_payer → select_fee →
-[enter_amount] → confirm_amount → share_number → "Dial *715*1*…# to pay SLE 1,000"`,
-plus *Check balance*, *Resend last receipt* and *Help*. `share_number` is Monime's
-`get_subscriber_msisdn` consent template: with consent the payment code is locked to
-the payer's number; without it the code is open (e.g. a parent paying) and the receipt
-goes to the portal phone. Idempotency key = session id + step.
+**Flow** (`ussd/unimak-flow.template.json`, modelled on Monime's own flows):
+
+```
+home ─┬─ pay ─────► id_type ─► enter_student_id | enter_application_ref ─► confirm_payer
+      │                                     └─(not found)─► try_again (×2)
+      │           ─► select_fee ─► [enter_amount ─(out of range)─► try_again]
+      │           ─► confirm_payment ─► make_payment (collect_payment) ─► payment_started
+      │                            └─ cancel ─► payment_cancelled
+      ├─ balance / resend ─► id_type ─► enter_… ─► stop("balances" / "Receipt … sent by SMS")
+      └─ help ─► stop(USSD_HELP_MESSAGE)
+```
+
+Static menus and prompts live in the flow (prompts validate length on the handset);
+every `on_done: exchange` page calls us. Student IDs and application refs may contain
+letters. On *Confirm and pay* we record a PENDING `USSD_FLOW` payment (the hold;
+idempotency key = session id + step) and navigate to `make_payment` with its
+`template_data`:
+
+| field | value |
+|---|---|
+| `amount` | major units, e.g. `"2500"` = SLE 2,500 (as in Monime's flows) |
+| `payment_target_ref` | the fee account's UVAN (`TODO(monime)`: confirm) |
+| `reference`, `metadata.payment_id` | our payment id (how the webhook is matched back) |
+| `metadata.financial_account_id` | the fee type's Monime account |
+
+The paying number comes back with the completed payment (`channel.phoneNumber`); the
+receipt SMS goes to it and to the phone on the portal record.
+
+**Once a collection reaches Monime it always completes.** A payment that completes
+after our 15-minute hold expired is still applied (late settlement); if the fee was
+paid again meanwhile, the obligation goes negative and the webhook event is noted
+*Overpaid by …* for a refund or credit.
 
 **Setup**
 
@@ -225,7 +250,9 @@ they don't hold, and only super admins manage super admins. Every write is recor
 | GET | `/banks`, `/payouts`, `/payouts/:id` | `payouts.read` |
 | POST | `/payouts` `{account, amount, bankProviderId, accountNumber, accountName?, narration?, idempotencyKey}` | `payouts.manage` |
 | GET | `/transfers`; POST `/transfers/:id/retry` | `transfers.read` / `transfers.retry` |
-| GET | `/reconciliation` (unmatched/failed webhook events, failed or stuck transfers and payouts, dead outbox, stale payments) | `reconciliation.read` |
+| GET | `/reconciliation` (open reconciliation items, last run, unmatched/failed webhook events, failed or stuck transfers and payouts, dead outbox, stale payments) | `reconciliation.read` |
+| GET | `/reconciliation/runs`, `/reconciliation/runs/:id` | `reconciliation.read` |
+| POST | `/reconciliation/runs` `{date?}`, `/reconciliation/items/:id/resolve` `{resolution}` | `reconciliation.manage` |
 | POST | `/reconciliation/webhook-events/:id/resolve` `{resolution}`, `/…/replay` | `reconciliation.manage` |
 | GET | `/outbox`; POST `/outbox/:id/retry` | `outbox.read` / `outbox.retry` |
 | GET | `/audit-log` | `audit.read` |
@@ -273,7 +300,7 @@ Envelope `{ apiVersion, event: { id, name, timestamp (unix s) }, object, data }`
 | `payment.processing_completed` | settle the payment (matched by our id in `reference` / `metadata.paymentId`, then the payment code in `ownershipGraph.owner`) |
 | `internal_transfer.completed` / `.failed` | commission `Transfer` → COMPLETED / FAILED (+ failure code) |
 | `payout.completed` / `.failed` | `Payout` → COMPLETED (+ fees) / FAILED (+ failure code) |
-| `financial_account.credited` / `.debited` | refresh the cached balance of our account (payload undocumented by Monime: best effort) |
+| `financial_account.credited` / `.debited` | refresh the cached balance of our account. Not in the public docs; shape from Monime's internal `AccountCredited/AccountDebited` (`transactionId`, `transactionReference`, `amount`, `newBalance`, `creditTime`/`debitTime`); parsed leniently |
 
 Anything else is stored and acknowledged as `IGNORED`. Register with
 `pnpm monime:register-webhook` (subscribes all of the above).
@@ -288,9 +315,31 @@ optionally rejects old timestamps (off by default: redeliveries may keep the ori
 
 Minimal HTML receipt check (masked name, amount, fee, date). `noindex`, `no-store`.
 
-### Cron — `GET /cron/outbox`, `GET /cron/expire-payments`
+### Cron — `GET /cron/outbox`, `/cron/expire-payments`, `/cron/reconcile`
 
-`Authorization: Bearer $CRON_SECRET` (what Vercel Cron sends).
+`Authorization: Bearer $CRON_SECRET` (what Vercel Cron sends). Outbox and expiry every
+5 minutes, reconciliation nightly at 01:00 UTC.
+
+## Nightly reconciliation
+
+`/cron/reconcile` compares yesterday (UTC = Sierra Leone time) with Monime; admins can
+run any past day (`POST /v1/admin/reconciliation/runs {date}`). Each run is a
+`ReconciliationRun` with `ReconciliationItem`s:
+
+| Check | Item | Status |
+|---|---|---|
+| Completed Monime payment into a fee account, ours not settled (missed webhook) | `MISSED_WEBHOOK_SETTLED` — settled through the normal settlement step | `AUTO_RESOLVED` |
+| Completed Monime payment we can't match (or amount/currency/double payment) | `UNMATCHED_MONIME_PAYMENT` | `OPEN` |
+| Our completed payment missing / not completed at Monime | `MISSING_AT_MONIME` | `OPEN` |
+| Amounts differ | `AMOUNT_MISMATCH` | `OPEN` |
+| Monime's fee ≠ our pricing | `MONIME_FEE_MISMATCH` | `OPEN` |
+| Commission transfer missing, wrong amount or not completed | `COMMISSION_MISSING` / `_AMOUNT_MISMATCH` / `_NOT_COMPLETED` | `OPEN` |
+
+Monime payments are listed per account with `GET /v1/payments?financialAccountId=`
+(no date filter; the order is detected from the first page and a newest-first list
+stops early — `TODO(monime)`: confirm ordering). Our payments the scan didn't see are
+checked one by one with `GET /v1/payments/{id}`. Re-running a window doesn't duplicate
+open items; admins resolve them with a note (audited).
 
 ## Domain rules (where to find them)
 
@@ -340,6 +389,7 @@ src/
     audit/           append-only audit log
     admin-api/       /v1/admin controllers (users, payments, accounts, payouts, reconciliation)
     ussd/            Monime USSD flow exchange (crypto, state machine)
+    reconciliation/  nightly comparison with Monime
 ```
 
 Each module: `domain/` (pure), `application/` (use cases, ports), `infrastructure/`
