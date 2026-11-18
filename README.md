@@ -93,6 +93,8 @@ payer ──USSD payment code──▶ fee-type account (unimak-fee-app, -tuitio
 
 | Command | |
 |---|---|
+| `pnpm admin:create --email … --role SUPER_ADMIN` | invite an admin (bootstrap) |
+| `pnpm ussd:flow https://<domain>` | render the USSD flow JSON for the Monime dashboard |
 | `pnpm monime:provision` | create/link financial accounts (safe to re-run) |
 | `pnpm monime:balances` | refresh and print available balances |
 | `pnpm monime:banks [SL]` | bank provider ids for payouts |
@@ -138,7 +140,104 @@ code and close our payment through reconciliation (we don't subscribe to
 
 ## API
 
-### Channel API — `/v1/channel` (USSD, Dots)
+There are four API surfaces, each with its own protection:
+
+| Surface | Who calls it | Protection |
+|---|---|---|
+| `POST /v1/ussd/exchange/<token>` | Monime USSD flow | RSA-OAEP + AES-128-GCM (our key pair), secret path token, optional IP allowlist |
+| `/v1/channel/*` | Dash Dots (and other server-to-server clients) | API key + HMAC over timestamp + body |
+| `/v1/admin/*` | Admin portal | Supabase Auth access token + role/permission guard, 2FA for bursar & super admin |
+| `/webhooks/monime`, `/r/:code` | Monime / anyone | Monime HMAC signature / public read-only |
+
+### USSD flow exchange — `POST /v1/ussd/exchange/<USSD_EXCHANGE_PATH_TOKEN>`
+
+Monime's USSD flow calls this on every page ([security docs](https://docs.monime.io/docs/products/ussd-flows/security)).
+Request `{ encryptedAesKey, encryptedExchangeData }`: the AES-128 key is wrapped with
+RSA-OAEP-SHA256 using **our** public key; the payload and our reply are AES-128-GCM
+blobs `[1-byte IV len][12-byte IV][ciphertext][16-byte tag]`, reply as base64 `text/plain`,
+HTTP 200 within 10 s.
+
+Monime's docs state these requests **are not signed**: decrypting proves the sender has
+our public key, not that it is Monime. So the endpoint also:
+
+- lives behind a secret path token (wrong token → 404) and an optional `USSD_ALLOWED_IPS` allowlist;
+- keeps the session state server-side (`UssdSession`); a page is only accepted when the
+  session expects it, so `flowData` can't skip to "confirm payment";
+- re-validates every input against our records (menu values, min/max amount);
+- accepts an exported phone number only if `uuidv5(msisdn, URL) == global.subscriberId`
+  (how Monime derives `subscriberId`);
+- rate-limits ID lookups per subscriber (`USSD_MAX_LOOKUPS_PER_15_MIN`) and masks names.
+
+A payment started here still has to be approved by the payer on their phone (Monime
+payment code), so the worst a forged request can do is create an unpaid code.
+
+**Flow:** `start → main_menu → id_type → enter_id → confirm_payer → select_fee →
+[enter_amount] → confirm_amount → share_number → "Dial *715*1*…# to pay SLE 1,000"`,
+plus *Check balance*, *Resend last receipt* and *Help*. `share_number` is Monime's
+`get_subscriber_msisdn` consent template: with consent the payment code is locked to
+the payer's number; without it the code is open (e.g. a parent paying) and the receipt
+goes to the portal phone. Idempotency key = session id + step.
+
+**Setup**
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out ussd_private.pem
+openssl pkey -in ussd_private.pem -pubout -out ussd_public.pem     # paste into the flow's Security section
+openssl rand -hex 32                                               # → USSD_EXCHANGE_PATH_TOKEN
+# USSD_RSA_PRIVATE_KEY = contents of ussd_private.pem (literal \n is fine)
+pnpm ussd:flow https://<domain> > unimak-flow.json                 # import into the Monime dashboard (contains the token: don't commit)
+```
+
+Rotation: put the new key in `USSD_RSA_PRIVATE_KEY`, the old one in
+`USSD_RSA_PRIVATE_KEY_PREVIOUS`, save the new public key in the dashboard, remove the old
+key after 30 minutes.
+
+### Admin API — `/v1/admin` (admin portal)
+
+`Authorization: Bearer <Supabase Auth access token>`. Sign-in — email + password, OAuth
+providers and TOTP 2FA — happens in the admin portal with Supabase Auth; this backend
+never handles passwords. It verifies the token (ES256/RS256 against the project's JWKS,
+or legacy HS256 with `SUPABASE_JWT_SECRET`; issuer, audience `authenticated`, expiry) and
+then requires an **active `AdminUser` with that email** (invite-only; bound to the
+Supabase user id on first login).
+
+| Role | Can (permission bundle) | 2FA |
+|---|---|---|
+| `SUPER_ADMIN` | everything, incl. users, payouts, account provisioning | required |
+| `BURSAR` | fee setup, adjustments, refunds, reconciliation, transfer/outbox retries, reports | required |
+| `FINANCE_OFFICER` | read payers/payments/accounts/payouts, resend receipts, export | — |
+| `HEAD_OF_DEPARTMENT` | read-only, limited to their departments' payers and payments | — |
+| `AUDITOR` | read-only everywhere, incl. the audit log | — |
+
+Single permissions can be granted on their own (`extraPermissions`, e.g.
+`instalments.manage`, or `payouts.manage` for a bursar). Nobody can grant permissions
+they don't hold, and only super admins manage super admins. Every write is recorded in
+`AuditLog` (before/after, append-only at the DB level).
+
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/me` | any admin |
+| GET/POST/PATCH | `/users`, `/users/:id` | `users.manage` |
+| GET | `/payments`, `/payments/:id` (filters: status, channel, feeType, payerRef, from, to) | `payments.read` |
+| POST | `/payments/:id/reconcile` | `payments.reconcile` |
+| GET | `/financial-accounts`; POST `/financial-accounts/:id/refresh-balance` | `accounts.read` |
+| POST | `/financial-accounts/provision` | `accounts.manage` |
+| GET | `/banks`, `/payouts`, `/payouts/:id` | `payouts.read` |
+| POST | `/payouts` `{account, amount, bankProviderId, accountNumber, accountName?, narration?, idempotencyKey}` | `payouts.manage` |
+| GET | `/transfers`; POST `/transfers/:id/retry` | `transfers.read` / `transfers.retry` |
+| GET | `/reconciliation` (unmatched/failed webhook events, failed or stuck transfers and payouts, dead outbox, stale payments) | `reconciliation.read` |
+| POST | `/reconciliation/webhook-events/:id/resolve` `{resolution}`, `/…/replay` | `reconciliation.manage` |
+| GET | `/outbox`; POST `/outbox/:id/retry` | `outbox.read` / `outbox.retry` |
+| GET | `/audit-log` | `audit.read` |
+
+Lists are cursor-paginated (`?limit=&cursor=` → `{ items, nextCursor }`); money is a
+string of minor units. Errors: 401 `UNAUTHENTICATED`, 403 `FORBIDDEN` / `MFA_REQUIRED`.
+
+Bootstrap the first admin: `pnpm admin:create --email you@unimak.edu.sl --role SUPER_ADMIN`,
+then sign in to the portal with that email. In Supabase: disable public sign-ups (or rely
+on the invite-only check), enable the email and OAuth providers you want, and enable TOTP MFA.
+
+### Channel API — `/v1/channel` (Dash Dots)
 
 Every request carries:
 
@@ -237,7 +336,10 @@ src/
     treasury/        financial accounts, commission transfers, payouts
     cron/            outbox sweep, payment expiry
     dev/             /dev/monime/simulate-webhook (non-production only)
-    admin-api/       stub (next phase)
+    auth/            Supabase JWT verification, roles/permissions, admin guard
+    audit/           append-only audit log
+    admin-api/       /v1/admin controllers (users, payments, accounts, payouts, reconciliation)
+    ussd/            Monime USSD flow exchange (crypto, state machine)
 ```
 
 Each module: `domain/` (pure), `application/` (use cases, ports), `infrastructure/`
@@ -252,7 +354,8 @@ routes every 5 minutes (sub-daily crons need a Pro plan).
 Set on Vercel: `DATABASE_URL` (Supabase transaction pooler,
 `?pgbouncer=true&connection_limit=1`), `DIRECT_URL` (direct, for migrations),
 `NODE_ENV=production`, `PUBLIC_BASE_URL`, the Monime and portal settings,
-`MONIME_WEBHOOK_SECRET` (32–256 chars), `CHANNEL_CLIENTS`, `CRON_SECRET`.
+`MONIME_WEBHOOK_SECRET` (32–256 chars), `CHANNEL_CLIENTS`, `CRON_SECRET`,
+`SUPABASE_URL` (admin auth), `USSD_RSA_PRIVATE_KEY` and `USSD_EXCHANGE_PATH_TOKEN`.
 Run `pnpm db:deploy` with `DIRECT_URL` before deploying a new migration, then
 `pnpm monime:provision` and `pnpm monime:register-webhook https://<domain>/webhooks/monime`
 once per environment.
