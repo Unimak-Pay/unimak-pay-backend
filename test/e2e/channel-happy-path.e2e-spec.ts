@@ -118,7 +118,7 @@ describe('channel API happy path: lookup → initiate → webhook → receipt + 
     };
     expect((await channel('get', `/v1/channel/payments/status/${paymentRef}`).expect(200)).body).toMatchObject(expected);
     expect((await channel('get', `/v1/channel/payments/status/mo${paymentRef}`).expect(200)).body).toMatchObject(expected);
-    await channel('get', '/v1/channel/payments/status/12345678').expect(404);
+    expect((await channel('get', '/v1/channel/payments/status/12345678').expect(404)).body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Payment not found' });
     await channel('get', '/v1/channel/payments/status/not-a-ref!').expect(404);
   });
 

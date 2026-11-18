@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
+import { DomainError } from '../../../shared/domain/errors';
 import type { PayerKind } from '../../catalog/domain/payer-profile';
 import { LookupPayerUseCase } from '../../payers/application/lookup-payer.use-case';
 import { PayerObligationsQuery } from '../../payers/application/payer-obligations.query';
@@ -73,14 +74,14 @@ export class ChannelController {
   @Get('payments/status/:ref')
   async getPaymentStatus(@Param('ref') ref: string) {
     const v = await this.paymentStatus.byPublicRef(ref.slice(0, 40));
-    if (!v) throw new NotFoundException('Payment not found');
+    if (!v) throw new DomainError('NOT_FOUND', 'Payment not found');
     return presentPaymentStatus(v);
   }
 
   @Get('payments/:id')
   async getPayment(@Req() req: ChannelRequest, @Param('id', ParseUUIDPipe) id: string) {
     const p = await this.payments.byId(id);
-    if (!p || p.clientId !== req.channelClient!.id) throw new NotFoundException('Payment not found');
+    if (!p || p.clientId !== req.channelClient!.id) throw new DomainError('NOT_FOUND', 'Payment not found');
     return presentPayment(p);
   }
 
