@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { MockPortalClient } from './mock-portal.client';
@@ -33,6 +33,16 @@ describe('MockPortalClient', () => {
     });
     const log = JSON.parse(readFileSync(path.join(dir, 'notifications.log.json'), 'utf8')) as unknown[];
     expect(log).toHaveLength(1);
+  });
+
+  it('still succeeds when the fixtures are read-only (deployed bundle)', async () => {
+    const ro = mkdtempSync(path.join(os.tmpdir(), 'portal-ro-'));
+    writeFileSync(path.join(ro, 'notifications.log.json'), '[]');
+    chmodSync(path.join(ro, 'notifications.log.json'), 0o444);
+    await expect(new MockPortalClient(ro, 0).notifyPayment({
+      event: 'application_paid', applicationRef: 'APP-2026-0001', receiptNumber: 'UNIMAK-2026-000002',
+      amount: '15000', currency: 'SLE', paidAt: new Date().toISOString(),
+    })).resolves.toBeUndefined();
   });
 
   it('applies artificial latency', async () => {

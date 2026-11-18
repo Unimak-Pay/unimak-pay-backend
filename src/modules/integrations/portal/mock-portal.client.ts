@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { Logger } from '@nestjs/common';
 import {
   type CohortQuery,
   type Page,
@@ -19,6 +20,8 @@ const PAGE_SIZE = 50;
  * - ref starting with "ERR-" → PortalError UNAVAILABLE (what it throws on timeout/5xx)
  */
 export class MockPortalClient implements PortalClient {
+  private readonly logger = new Logger(MockPortalClient.name);
+
   constructor(
     private readonly fixturesDir: string,
     private readonly latencyMs: number,
@@ -69,7 +72,14 @@ export class MockPortalClient implements PortalClient {
       log = [];
     }
     log.push({ receivedAt: new Date().toISOString(), payload });
-    await fs.writeFile(file, JSON.stringify(log, null, 2) + '\n');
+    try {
+      await fs.writeFile(file, JSON.stringify(log, null, 2) + '\n');
+    } catch (err) {
+      // Deployed (e.g. Vercel) the bundle is read-only; the log line is the record.
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EROFS' && code !== 'EACCES' && code !== 'EPERM') throw err;
+      this.logger.log(`portal notification (log file not writable: ${code}): ${JSON.stringify(payload)}`);
+    }
   }
 
   private async simulate(ref?: string): Promise<void> {
