@@ -6,3 +6,4 @@ dist/
 coverage/
 .vercel/
 fixtures/portal/notifications.log.json
+*.pem

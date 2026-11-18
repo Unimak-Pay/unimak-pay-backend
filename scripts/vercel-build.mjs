@@ -70,7 +70,7 @@ for (const f of process.env.VERCEL ? readdirSync(path.join(fn, 'node_modules/.pr
 
 writeFileSync(
   path.join(fn, '.vc-config.json'),
-  JSON.stringify({ runtime: 'nodejs24.x', handler: 'index.js', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 300 }, null, 2),
+  JSON.stringify({ runtime: 'nodejs24.x', handler: 'index.js', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 300, regions: ['dub1'] }, null, 2), // dub1 = next to Supabase eu-west-1
 );
 
 const allCrons = JSON.parse(readFileSync(path.join(root, 'vercel-crons.json'), 'utf8')).crons;
