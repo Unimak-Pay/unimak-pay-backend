@@ -137,7 +137,7 @@ async function main(): Promise<void> {
         update: p,
       });
     }
-  });
+  }, { timeout: 60_000, maxWait: 10_000 }); // many round trips to a remote DB
   console.log('Seed complete.');
 }
 

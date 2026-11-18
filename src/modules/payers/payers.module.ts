@@ -15,6 +15,6 @@ import { PrismaPayerRepository } from './infrastructure/prisma-payer.repository'
     LookupPayerUseCase,
     PayerObligationsQuery,
   ],
-  exports: [PAYER_REPOSITORY, LookupPayerUseCase, PayerObligationsQuery],
+  exports: [PAYER_REPOSITORY, LookupPayerUseCase, PayerObligationsQuery, PayerDirectory],
 })
 export class PayersModule {}

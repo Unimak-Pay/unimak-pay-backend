@@ -42,7 +42,7 @@ describe('financial accounts', () => {
     );
     const again = await app.get(ProvisionAccountsUseCase).execute();
     expect(again.every((a) => !a.created)).toBe(true);
-    expect(await prisma.financialAccount.count()).toBe(6);
+    expect(await prisma.financialAccount.count()).toBe((await prisma.feeType.count()) + 1); // one per fee type + platform
   });
 
   it('collects into the fee type’s own account (payment code)', async () => {

@@ -243,6 +243,13 @@ they don't hold, and only super admins manage super admins. Every write is recor
 |---|---|---|
 | GET | `/me` | any admin |
 | GET/POST/PATCH | `/users`, `/users/:id` | `users.manage` |
+| GET | `/fee-types`, `/fees?feeType=&status=`, `/fees/:id` (with rules), `/fees/:id/preview?kind=&ref=` | `fees.read` |
+| POST | `/fee-types` `{code, name, payerKind, recurrence}` — also creates the fee type's **Monime financial account**; `/fee-types/:id/account` retries it | `fees.manage` |
+| PATCH | `/fee-types/:id` `{name}` | `fees.manage` |
+| POST/PATCH | `/fees` `{feeTypeId, name, period, allowInstalments, defaultMinInstalment?, dueDate?}` (DRAFT), `/fees/:id` (status DRAFT→ACTIVE→CLOSED; ACTIVE needs a rate rule and the account) | `fees.manage` |
+| POST/PUT/DELETE | `/fees/:id/rate-rules[/:ruleId]` `{programCode?, department?, level?, residency?, intake?, amount}` — ties rejected; deleting a tie-breaker refused | `fees.manage` |
+| POST/DELETE | `/fees/:id/eligibility-rules[/:ruleId]` (same matchers + `finalYear?`) | `fees.manage` |
+| PUT/DELETE | `/fees/:id/instalment-rules/:programCode` `{minInstalment}` | `instalments.manage` |
 | GET | `/payments`, `/payments/:id` (filters: status, channel, feeType, payerRef, from, to) | `payments.read` |
 | POST | `/payments/:id/reconcile` | `payments.reconcile` |
 | GET | `/financial-accounts`; POST `/financial-accounts/:id/refresh-balance` | `accounts.read` |

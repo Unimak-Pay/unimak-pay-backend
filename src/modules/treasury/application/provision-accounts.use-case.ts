@@ -33,17 +33,7 @@ export class ProvisionAccountsUseCase {
     const actorId = opts.actorId ?? 'system';
     const out: ProvisionedAccount[] = [];
     const feeTypes = await this.prisma.feeType.findMany({ include: { account: true }, orderBy: { code: 'asc' } });
-    for (const ft of feeTypes) {
-      if (ft.account) {
-        out.push({ reference: ft.account.reference, monimeId: ft.account.monimeId, name: ft.account.name, purpose: 'FEE_TYPE', feeTypeCode: ft.code, created: false });
-        continue;
-      }
-      const reference = feeTypeAccountReference(ft.code);
-      const { id, uvan, name, created } = await this.ensureRemote(reference, feeTypeAccountName(ft.name), { feeTypeCode: ft.code });
-      const row = await this.prisma.financialAccount.create({ data: { monimeId: id, reference, name, purpose: 'FEE_TYPE', feeTypeId: ft.id, uvan } });
-      await this.audit.record({ actorId, action: created ? 'account.create' : 'account.link', entity: 'FinancialAccount', entityId: row.id, after: row });
-      out.push({ reference, monimeId: id, name, purpose: 'FEE_TYPE', feeTypeCode: ft.code, created });
-    }
+    for (const ft of feeTypes) out.push(await this.provisionFeeType(ft.id, actorId));
 
     if (opts.platform ?? true) {
       const existing = await this.prisma.financialAccount.findUnique({ where: { reference: PLATFORM_ACCOUNT_REFERENCE } });
@@ -57,6 +47,19 @@ export class ProvisionAccountsUseCase {
       }
     }
     return out;
+  }
+
+  /** The Monime account of one fee type: existing, linked by reference, or created. Idempotent. */
+  async provisionFeeType(feeTypeId: string, actorId = 'system'): Promise<ProvisionedAccount> {
+    const ft = await this.prisma.feeType.findUniqueOrThrow({ where: { id: feeTypeId }, include: { account: true } });
+    if (ft.account) {
+      return { reference: ft.account.reference, monimeId: ft.account.monimeId, name: ft.account.name, purpose: 'FEE_TYPE', feeTypeCode: ft.code, created: false };
+    }
+    const reference = feeTypeAccountReference(ft.code);
+    const { id, uvan, name, created } = await this.ensureRemote(reference, feeTypeAccountName(ft.name), { feeTypeCode: ft.code });
+    const row = await this.prisma.financialAccount.create({ data: { monimeId: id, reference, name, purpose: 'FEE_TYPE', feeTypeId: ft.id, uvan } });
+    await this.audit.record({ actorId, action: created ? 'account.create' : 'account.link', entity: 'FinancialAccount', entityId: row.id, after: row });
+    return { reference, monimeId: id, name, purpose: 'FEE_TYPE', feeTypeCode: ft.code, created };
   }
 
   private async ensureRemote(reference: string, name: string, metadata: Record<string, string>) {
