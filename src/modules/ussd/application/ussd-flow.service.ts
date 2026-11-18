@@ -210,11 +210,10 @@ export class UssdFlowService {
       receipt_name: state.feeName!.slice(0, 40),
       payment_id: payment.id,
       financial_account_id: fa.monimeId,
-      // labels
+      // labels. payment_started is reached by `next`, not an exchange, so it gets
+      // no page data: its text is static in the flow template.
       fee_name: state.feeName!,
       amount_display: amountDisplay,
-      payment_message: `Paying ${amountDisplay} for ${state.feeName}. Your receipt will come by SMS.`,
-      payment_ref: payment.id.slice(0, 8).toUpperCase(),
     });
   }
 

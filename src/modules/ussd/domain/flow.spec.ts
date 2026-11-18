@@ -27,3 +27,15 @@ describe('collect_payment amount', () => {
     expect(toMajorAmount(5n)).toBe('0.05');
   });
 });
+
+describe('flow template', () => {
+  // Page data from an exchange reply applies only to the page it navigates to;
+  // a page reached by `on_done: next` gets none, so it must not use $(data.…).
+  it('pages reached by `next` do not read exchange page data', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const tpl = require('../../../../ussd/unimak-flow.template.json') as { pages: { id: string; component: unknown; on_done?: { action: string; next_page?: string } }[] };
+    const nextTargets = new Set(tpl.pages.filter((p) => p.on_done?.action === 'next').map((p) => p.on_done!.next_page));
+    const offenders = tpl.pages.filter((p) => nextTargets.has(p.id) && JSON.stringify(p.component).includes('$(data.')).map((p) => p.id);
+    expect(offenders).toEqual([]);
+  });
+});

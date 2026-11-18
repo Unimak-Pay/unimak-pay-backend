@@ -196,7 +196,7 @@
     {
       "id": "payment_started",
       "component": {
-        "label": "$(data.payment_message)\nRef: $(data.payment_ref)",
+        "label": "Thank you. Your payment is being processed and your receipt will come by SMS.",
         "type": "display"
       }
     },

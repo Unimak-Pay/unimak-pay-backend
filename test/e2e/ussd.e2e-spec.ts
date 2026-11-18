@@ -166,8 +166,6 @@ describe('USSD payment journey (collect_payment)', () => {
         financial_account_id: tuition.monimeId,
         fee_name: 'Tuition 2026/27',
         amount_display: 'SLE 2,500',
-        payment_message: 'Paying SLE 2,500 for Tuition 2026/27. Your receipt will come by SMS.',
-        payment_ref: p.id.slice(0, 8).toUpperCase(),
       },
     });
     // a PENDING hold, no payment code: collection happens inside the USSD session
