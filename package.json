@@ -20,6 +20,8 @@
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset --force",
     "channel": "tsx --env-file=.env scripts/channel.ts",
+    "openapi:lint": "npx -y @redocly/cli@1.34.3 lint openapi.yaml",
+    "openapi:preview": "npx -y @redocly/cli@1.34.3 preview-docs openapi.yaml",
     "start:local": "tsc -p tsconfig.build.json && node --env-file=.env dist/src/main.js",
     "build:watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "monime:provision": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/provision-accounts.js",

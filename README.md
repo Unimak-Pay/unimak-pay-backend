@@ -142,6 +142,12 @@ code and close our payment through reconciliation (we don't subscribe to
 
 ## API
 
+The full contract is in **[`openapi.yaml`](openapi.yaml)** (OpenAPI 3.1): every route,
+request schema, auth scheme and required admin permission (`x-permission`).
+`pnpm openapi:lint` validates it, `pnpm openapi:preview` serves rendered docs locally,
+and `test/e2e/openapi.e2e-spec.ts` fails if a route is added or removed without
+updating the spec.
+
 There are four API surfaces, each with its own protection:
 
 | Surface | Who calls it | Protection |
