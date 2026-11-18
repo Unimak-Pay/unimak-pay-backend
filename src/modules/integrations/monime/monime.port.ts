@@ -49,7 +49,9 @@ export interface MonimePaymentRecord {
   metadata: Record<string, string>;
   ownerId: string | null;
   fees: bigint;
+  /** channel number as Monime reports it (usually masked) */
   payerPhone: string | null;
+  orderNumber: string | null;
   createTime: Date;
   updateTime: Date | null;
 }

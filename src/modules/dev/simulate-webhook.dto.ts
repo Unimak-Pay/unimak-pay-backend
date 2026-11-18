@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, Length, Matches } from 'class-validator';
+import { IsBoolean, IsIn, IsObject, IsOptional, IsString, IsUUID, Length, Matches } from 'class-validator';
 
 /** Exactly one of paymentId / transferId / payoutId (our ids). */
 export class SimulateWebhookDto {
@@ -27,6 +27,16 @@ export class SimulateWebhookDto {
   @IsOptional()
   @Matches(/^[1-9]\d{0,17}$/)
   amount?: string;
+
+  /** The number that paid (reported masked, like Monime does); default the payment's. */
+  @IsOptional()
+  @Matches(/^\+\d{8,15}$/)
+  payerPhone?: string;
+
+  /** Extra payment metadata, e.g. { payer_phone } as a USSD flow would send it. */
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, string>;
 
   /** false: Monime records the payment but the webhook never arrives (test reconciliation). */
   @IsOptional()

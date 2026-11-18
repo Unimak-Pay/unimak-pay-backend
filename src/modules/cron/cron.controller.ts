@@ -27,12 +27,20 @@ export class CronController {
     return total;
   }
 
-  /** Nightly: compare yesterday (UTC) with Monime. */
+  /**
+   * Nightly: compare yesterday (UTC) with Monime, then the housekeeping the
+   * 5-minute crons do — on plans that only allow daily crons this is the
+   * fallback (Supabase pg_cron also expires payments every 5 minutes).
+   */
   @Get('reconcile')
-  reconcile() {
-    return this.reconciliation.runNightly();
+  async reconcile() {
+    const reconciliation = await this.reconciliation.runNightly();
+    const housekeeping = await this.expirePayments();
+    const outbox = await this.outbox();
+    return { ...reconciliation, housekeeping, outbox };
   }
 
+  /** Open payments past expiry (Monime never called back) → EXPIRED; old USSD sessions removed. */
   @Get('expire-payments')
   async expirePayments() {
     const expired = await this.expire.execute();

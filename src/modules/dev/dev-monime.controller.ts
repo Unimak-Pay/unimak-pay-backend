@@ -54,22 +54,28 @@ export class DevMonimeController {
 
     if (mock && p.monimeRef) await mock.setStatus(p.monimeRef, 'completed');
     const monimePaymentId = `pay-mock-${p.id.slice(0, 8)}`;
+    // Like Monime: the paying number comes masked, plus an order number.
+    const payer = dto.payerPhone ?? p.payerPhone;
+    const maskedPhone = payer && !payer.includes('*') ? `${payer.slice(0, 6)}****${payer.slice(-2)}` : payer;
+    const orderNumber = `MO${p.paymentRef}`;
     await mock?.recordPayment({
       id: monimePaymentId, amount: BigInt(dto.amount ?? p.amount), financialAccountId: o.settlementAccount, reference: p.id,
-      metadata: { paymentId: p.id }, ownerId: p.monimeRef, fees: p.monimeFee, payerPhone: p.payerPhone,
+      metadata: { paymentId: p.id }, ownerId: p.monimeRef, fees: p.monimeFee, payerPhone: maskedPhone, orderNumber,
     });
     if (dto.deliver === false) return { simulated: 'completed', delivered: false, monimePaymentId, note: 'Recorded at Monime only (missed webhook)' };
     return this.deliver(dto, MONIME_EVENTS.paymentCompleted, { id: monimePaymentId, type: 'payment' }, {
       id: monimePaymentId,
       status: 'completed',
       amount: { currency: 'SLE', value: Number(dto.amount ?? p.amount) },
-      channel: { type: 'momo', provider: 'm17', reference: 'mock', phoneNumber: p.payerPhone, fingerprint: 'mock' },
+      channel: { type: 'momo', provider: 'm17', reference: 'mock', phoneNumber: maskedPhone, fingerprint: 'mock' },
+      orderNumber,
       reference: p.id,
       financialAccountId: o.settlementAccount,
       financialTransactionReference: `txn-mock-${p.id.slice(0, 8)}`,
       fees: p.monimeFee > 0n ? [{ code: 'processing', amount: { currency: 'SLE', value: Number(p.monimeFee) } }] : [],
-      ownershipGraph: { owner: { id: p.monimeRef, type: 'payment_code', metadata: { paymentId: p.id } } },
-      metadata: { paymentId: p.id },
+      // the payment code's metadata, as we set it at initiation
+      ownershipGraph: { owner: { id: p.monimeRef, type: 'payment_code', metadata: { paymentId: p.id, paymentRef: p.paymentRef, ...(p.phoneAuthorized && p.payerPhone ? { payer_phone: p.payerPhone } : {}) } } },
+      metadata: { paymentId: p.id, ...(dto.metadata ?? {}) },
       createTime: p.createdAt.toISOString(),
     });
   }

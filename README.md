@@ -56,7 +56,8 @@ Mock portal:
 - `PORTAL_MOCK_LATENCY_MS` adds artificial latency
 - unknown refs → `PortalError NOT_FOUND` (same shape as the HTTP client's 404); refs starting with `ERR-` → `UNAVAILABLE`
 
-SMS goes to the console (`[SMS] → +232…`) in every mode for now.
+We send no SMS: Monime texts the payer itself when a payment completes (with its
+order number).
 
 `HttpMonimeClient` follows Monime's caph.2025-08-23 OpenAPI spec (Bearer token,
 `Monime-Space-Id`, `Monime-Version`, `Idempotency-Key` ≤ 64 chars, `{ success, result }`
@@ -127,7 +128,8 @@ curl -XPOST localhost:3100/dev/monime/simulate-webhook -H 'content-type: applica
 # 4. Check the result
 pnpm channel GET /v1/channel/payments/<paymentId>
 pnpm channel GET /v1/channel/payers/applicant/APP-2026-0001/receipts
-open "http://localhost:3100/r/<verifyCode>"           # link is in the SMS log line
+pnpm channel GET /v1/channel/payments/status/<paymentRef>   # or Monime's order number
+open "http://localhost:3100/r/<verifyCode>"           # Receipt.verifyCode
 cat fixtures/portal/notifications.log.json            # portal.application_paid
 ```
 
@@ -178,7 +180,8 @@ home ─┬─ pay ─────► id_type ─► enter_student_id | enter_ap
       │           ─► select_fee ─► [enter_amount ─(out of range)─► try_again]
       │           ─► confirm_payment ─► make_payment (collect_payment) ─► payment_started
       │                            └─ cancel ─► payment_cancelled
-      ├─ balance / resend ─► id_type ─► enter_… ─► stop("balances" / "Receipt … sent by SMS")
+      ├─ balance ─► id_type ─► enter_… ─► stop("balances")
+      ├─ status ──► enter_payment_ref ─► stop("Payment 12345678: PAID …")   (our ref or Monime order no.)
       └─ help ─► stop(USSD_HELP_MESSAGE)
 ```
 
@@ -195,8 +198,16 @@ idempotency key = session id + step) and navigate to `make_payment` with its
 | `reference`, `metadata.payment_id` | our payment id (how the webhook is matched back) |
 | `metadata.financial_account_id` | the fee type's Monime account |
 
-The paying number comes back with the completed payment (`channel.phoneNumber`); the
-receipt SMS goes to it and to the phone on the portal record.
+The make_payment label shows our **payment ref** (8 digits) for status checks;
+`payment_started` is static text (it is reached by `next`, so it gets no page data).
+
+**The paying number.** Monime masks it everywhere (`channel.phoneNumber` =
+`+23276****56`) and the USSD `subscriberId` is `uuidv5(msisdn, URL)`. So: at *Confirm
+and pay* we check whether the dialling phone is the portal phone (hash match) and
+record it if so; on completion we take, best first, a full number in the payment
+metadata (`payer_phone` — authorised Dots payment codes carry it), an unmasked channel
+number, our number if it fits Monime's mask, else Monime's masked number. Never the
+portal phone unverified.
 
 **Once a collection reaches Monime it always completes.** A payment that completes
 after our 15-minute hold expired is still applied (late settlement); if the fee was
@@ -230,7 +241,7 @@ Supabase user id on first login).
 |---|---|---|
 | `SUPER_ADMIN` | everything, incl. users, payouts, account provisioning | required |
 | `BURSAR` | fee setup, adjustments, refunds, reconciliation, transfer/outbox retries, reports | required |
-| `FINANCE_OFFICER` | read payers/payments/accounts/payouts, resend receipts, export | — |
+| `FINANCE_OFFICER` | read payers/payments/accounts/payouts, export | — |
 | `HEAD_OF_DEPARTMENT` | read-only, limited to their departments' payers and payments | — |
 | `AUDITOR` | read-only everywhere, incl. the audit log | — |
 
@@ -250,7 +261,7 @@ they don't hold, and only super admins manage super admins. Every write is recor
 | POST/PUT/DELETE | `/fees/:id/rate-rules[/:ruleId]` `{programCode?, department?, level?, residency?, intake?, amount}` — ties rejected; deleting a tie-breaker refused | `fees.manage` |
 | POST/DELETE | `/fees/:id/eligibility-rules[/:ruleId]` (same matchers + `finalYear?`) | `fees.manage` |
 | PUT/DELETE | `/fees/:id/instalment-rules/:programCode` `{minInstalment}` | `instalments.manage` |
-| GET | `/payments`, `/payments/:id` (filters: status, channel, feeType, payerRef, from, to) | `payments.read` |
+| GET | `/payments`, `/payments/:id` (filters: status, channel, feeType, payerRef, `ref` = payment ref / Monime order no. / spm-… id, from, to) | `payments.read` |
 | POST | `/payments/:id/reconcile` | `payments.reconcile` |
 | GET | `/financial-accounts`; POST `/financial-accounts/:id/refresh-balance` | `accounts.read` |
 | POST | `/financial-accounts/provision` | `accounts.manage` |
@@ -286,10 +297,10 @@ X-Signature: hex(HMAC-SHA256(secret, "<timestamp>.<raw body>"))   # empty body f
 | GET | `/payers/:kind/:ref` | `kind` = `applicant` \| `student`. Masked name, program line; creates missing obligations |
 | GET | `/payers/:kind/:ref/obligations` | amount, paid, balance, holds, payable, minInstalment, dueDate, status |
 | POST | `/quotes` | validate `{obligationId, amount, channel}` without creating anything |
-| POST | `/payments` | `{obligationId, amount, payerPhone, channel, idempotencyKey}` → `{paymentId, status, expiresAt}` |
-| GET | `/payments/:id` | only payments created by the calling client |
+| POST | `/payments` | `{obligationId, amount, payerPhone, channel, idempotencyKey}` → `{paymentId, paymentRef, status, expiresAt, ussdCode}` |
+| GET | `/payments/:id` | only payments created by the calling client (incl. `paymentRef`, `monimeOrderNumber`) |
+| GET | `/payments/status/:ref` | by our 8-digit `paymentRef` or Monime's order number (any channel; payer masked) |
 | GET | `/payers/:kind/:ref/receipts` | |
-| POST | `/receipts/:number/resend` | re-sends to the phone on record |
 
 Money is always a string of SLE minor units (`"150000"` = SLE 1,500.00); responses also
 include a `display` string. Errors: `{ "error": { "code", "message", "details" } }`.
@@ -325,7 +336,14 @@ Minimal HTML receipt check (masked name, amount, fee, date). `noindex`, `no-stor
 ### Cron — `GET /cron/outbox`, `/cron/expire-payments`, `/cron/reconcile`
 
 `Authorization: Bearer $CRON_SECRET` (what Vercel Cron sends). Outbox and expiry every
-5 minutes, reconciliation nightly at 01:00 UTC.
+5 minutes, reconciliation nightly at 01:00 UTC; the nightly call also runs the expiry
+and outbox sweeps (the fallback where only daily crons are allowed).
+
+**Stale payments are cleared automatically.** An open payment past `expiresAt` (Monime
+never called our webhook) becomes `EXPIRED`: every 5 minutes by a Supabase `pg_cron`
+job (migration `expire_payments_job`; skipped on Postgres without pg_cron), by
+`/cron/expire-payments`, and nightly. Holds stop counting at `expiresAt` anyway. If
+the webhook arrives later the payment is still applied (late settlement).
 
 ## Nightly reconciliation
 
@@ -384,9 +402,9 @@ src/
     payers/          portal lookup, payer snapshots, lazy obligations
     ledger/          append-only entries, positions
     payments/        quote, initiate, settle, expire, reconcile
-    receipts/        numbering, verify codes, resend
-    outbox/          writer, dispatcher, handlers (SMS, portal, commission)
-    integrations/    PortalClient, MonimeClient, SmsSender ports + mock/http adapters
+    receipts/        numbering, verify codes
+    outbox/          writer, dispatcher, handlers (portal, commission)
+    integrations/    PortalClient, MonimeClient ports + mock/http adapters
     channel-api/     /v1/channel controllers, HMAC guard, public receipt page
     webhooks/        Monime signature, envelope parsing, inbox, receiver
     treasury/        financial accounts, commission transfers, payouts
@@ -417,9 +435,9 @@ All paths route to that function; the Nest app is cached across invocations.
 
 Crons come from `vercel-crons.json` (outbox and expiry every 5 min, reconciliation
 01:00 UTC). The Hobby plan only allows daily crons: build with `VERCEL_CRONS=daily`
-there (only reconciliation is kept) — then run the outbox and expiry sweeps from
-elsewhere (e.g. Supabase `pg_cron` + `pg_net` calling the same routes with
-`Authorization: Bearer $CRON_SECRET`), or move to Pro.
+there (only reconciliation is kept). Payment expiry still runs every 5 minutes in
+the database (`pg_cron`); the outbox is dispatched inline after each webhook, and
+anything left over goes with the nightly run.
 
 Check a build locally: `VERCEL_CRONS=daily node scripts/vercel-build.mjs` (keeps the
 local Prisma engine; on Vercel only the Linux one is kept).

@@ -3,6 +3,7 @@ import { formatSle } from '../../../shared/domain/money';
 import type { ObligationView } from '../../payers/application/payer-obligations.query';
 import { type Payer, programLine } from '../../payers/domain/payer';
 import type { PaymentRecord } from '../../payments/application/payment.repository';
+import type { PaymentStatusView } from '../../payments/application/payment-status.query';
 import type { ReceiptView } from '../../receipts/application/receipts.query';
 
 const money = (v: bigint) => ({ value: v.toString(), display: formatSle(v) });
@@ -41,6 +42,10 @@ export function presentPayment(p: PaymentRecord, now = new Date()) {
   const status = (p.status === 'INITIATED' || p.status === 'PENDING') && p.expiresAt <= now ? 'EXPIRED' : p.status;
   return {
     paymentId: p.id,
+    /** 8-digit ref to give the payer for status checks */
+    paymentRef: p.paymentRef,
+    /** Monime order number (in Monime's SMS), once the payment completed */
+    monimeOrderNumber: p.monimeOrderNumber,
     obligationId: p.obligationId,
     status,
     amount: money(p.amount),
@@ -50,6 +55,20 @@ export function presentPayment(p: PaymentRecord, now = new Date()) {
     ussdCode: status === 'PENDING' ? p.ussdCode : null,
     completedAt: p.completedAt?.toISOString() ?? null,
     failureReason: status === 'FAILED' ? p.failureReason : null,
+  };
+}
+
+export function presentPaymentStatus(v: PaymentStatusView) {
+  return {
+    paymentRef: v.paymentRef,
+    monimeOrderNumber: v.monimeOrderNumber,
+    status: v.status,
+    amount: money(v.amount),
+    feeName: v.feeName,
+    payer: { kind: v.payerKind.toLowerCase(), ref: v.payerRef, maskedName: v.maskedName },
+    receiptNumber: v.receiptNumber,
+    createdAt: v.createdAt.toISOString(),
+    completedAt: v.completedAt?.toISOString() ?? null,
   };
 }
 

@@ -1,10 +1,7 @@
-/** Outbox message types and payloads (JSON-safe: money as minor-unit strings). */
-export interface SmsReceiptPayload {
-  phone: string;
-  text: string;
-  receiptNumber: string;
-}
-
+/**
+ * Outbox message types and payloads (JSON-safe: money as minor-unit strings).
+ * No receipt SMS: Monime texts the payer when a payment completes.
+ */
 export interface PortalApplicationPaidPayload {
   applicationRef: string;
   receiptNumber: string;
@@ -20,7 +17,6 @@ export interface CommissionTransferPayload {
 }
 
 export interface OutboxPayloads {
-  'sms.receipt': SmsReceiptPayload;
   'portal.application_paid': PortalApplicationPaidPayload;
   'monime.commission_transfer': CommissionTransferPayload;
 }

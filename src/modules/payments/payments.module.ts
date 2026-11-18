@@ -7,6 +7,7 @@ import { ExpirePaymentsUseCase } from './application/expire-payments.use-case';
 import { InitiatePaymentUseCase } from './application/initiate-payment.use-case';
 import { PaymentEvaluator } from './application/payment-evaluator';
 import { PAYMENT_REPOSITORY } from './application/payment.repository';
+import { PaymentStatusQuery } from './application/payment-status.query';
 import { ReconcilePaymentUseCase } from './application/reconcile-payment.use-case';
 import { QuotePaymentUseCase } from './application/quote-payment.use-case';
 import { SettlePaymentService } from './application/settle-payment.service';
@@ -22,7 +23,8 @@ import { PrismaPaymentRepository } from './infrastructure/prisma-payment.reposit
     ExpirePaymentsUseCase,
     SettlePaymentService,
     ReconcilePaymentUseCase,
+    PaymentStatusQuery,
   ],
-  exports: [PAYMENT_REPOSITORY, QuotePaymentUseCase, InitiatePaymentUseCase, ExpirePaymentsUseCase, SettlePaymentService, ReconcilePaymentUseCase],
+  exports: [PAYMENT_REPOSITORY, QuotePaymentUseCase, InitiatePaymentUseCase, ExpirePaymentsUseCase, SettlePaymentService, ReconcilePaymentUseCase, PaymentStatusQuery],
 })
 export class PaymentsModule {}

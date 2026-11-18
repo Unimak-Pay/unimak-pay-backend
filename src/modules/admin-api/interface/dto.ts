@@ -27,6 +27,10 @@ export class PaymentsQuery extends PageQuery {
   @IsOptional() @IsString() @Length(1, 64)
   payerRef?: string;
 
+  /** our 8-digit payment ref, Monime's order number, or a Monime payment id (spm-…) */
+  @IsOptional() @IsString() @Length(1, 64)
+  ref?: string;
+
   @IsOptional() @IsISO8601()
   from?: string;
 

@@ -6,7 +6,6 @@ import { OutboxWriter } from './application/outbox-writer';
 import {
   CommissionTransferHandler,
   PortalApplicationPaidHandler,
-  SmsReceiptHandler,
 } from './infrastructure/handlers';
 
 @Module({
@@ -14,12 +13,11 @@ import {
   providers: [
     OutboxWriter,
     OutboxDispatcher,
-    SmsReceiptHandler,
     PortalApplicationPaidHandler,
     CommissionTransferHandler,
     {
       provide: OUTBOX_HANDLERS,
-      inject: [SmsReceiptHandler, PortalApplicationPaidHandler, CommissionTransferHandler],
+      inject: [PortalApplicationPaidHandler, CommissionTransferHandler],
       useFactory: (...handlers: unknown[]) => handlers,
     },
   ],

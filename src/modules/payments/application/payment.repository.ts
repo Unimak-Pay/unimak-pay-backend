@@ -12,13 +12,17 @@ export interface PaymentRecord {
   channel: Channel;
   clientId: string;
   idempotencyKey: string;
-  payerPhone: string;
+  /** 8-digit ref shown to the payer for status checks */
+  paymentRef: string;
+  /** number that actually paid (full, or Monime's masked one); null until known */
+  payerPhone: string | null;
   phoneAuthorized: boolean;
   collectionMethod: 'PAYMENT_CODE' | 'USSD_FLOW';
   status: PaymentStatus;
   monimeRef: string | null;
   ussdCode: string | null;
   monimePaymentId: string | null;
+  monimeOrderNumber: string | null;
   pricingConfigId: string;
   monimeFee: Minor;
   platformFee: Minor;
@@ -35,7 +39,7 @@ export interface NewPayment {
   channel: Channel;
   clientId: string;
   idempotencyKey: string;
-  payerPhone: string;
+  payerPhone: string | null;
   phoneAuthorized: boolean;
   collectionMethod: 'PAYMENT_CODE' | 'USSD_FLOW';
   pricingConfigId: string;
@@ -75,10 +79,11 @@ export interface PaymentRepository {
   lockObligation(obligationId: string, db: Db): Promise<LockedObligation | null>;
   /** SELECT ... FOR UPDATE on the payment. */
   lockPayment(id: string, db: Db): Promise<PaymentRecord | null>;
+  /** Inserts INITIATED with a fresh unique paymentRef. */
   create(p: NewPayment, db: Db): Promise<PaymentRecord>;
   update(
     id: string,
-    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'ussdCode' | 'monimePaymentId' | 'completedAt' | 'failureReason'>>,
+    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'ussdCode' | 'monimePaymentId' | 'monimeOrderNumber' | 'payerPhone' | 'completedAt' | 'failureReason'>>,
     db?: Db,
   ): Promise<PaymentRecord>;
   /** Marks open payments past expiry as EXPIRED. Returns count. */

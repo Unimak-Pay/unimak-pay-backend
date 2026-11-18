@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { type Db, PrismaService } from '../../../shared/infrastructure/prisma.service';
 import type {
@@ -6,6 +7,8 @@ import type {
   PaymentRecord,
   PaymentRepository,
 } from '../application/payment.repository';
+
+const newPaymentRef = (): string => String(randomInt(10_000_000, 100_000_000));
 
 @Injectable()
 export class PrismaPaymentRepository implements PaymentRepository {
@@ -66,8 +69,11 @@ export class PrismaPaymentRepository implements PaymentRepository {
     };
   }
 
-  create(p: NewPayment, db: Db): Promise<PaymentRecord> {
-    return db.payment.create({ data: { ...p, status: 'INITIATED' } });
+  async create(p: NewPayment, db: Db): Promise<PaymentRecord> {
+    // 9×10^7 refs: check first rather than catch P2002, which would abort the caller's transaction.
+    let paymentRef = newPaymentRef();
+    for (let i = 0; i < 5 && (await db.payment.findUnique({ where: { paymentRef }, select: { id: true } })); i++) paymentRef = newPaymentRef();
+    return db.payment.create({ data: { ...p, paymentRef, status: 'INITIATED' } });
   }
 
   update(id: string, patch: Partial<PaymentRecord>, db: Db = this.prisma): Promise<PaymentRecord> {

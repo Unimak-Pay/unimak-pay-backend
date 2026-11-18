@@ -10,6 +10,7 @@ import { ReconcilePaymentUseCase } from '../../payments/application/reconcile-pa
 import { NightlyReconciliationService } from '../../reconciliation/application/nightly-reconciliation.service';
 import { CommissionTransferService } from '../../treasury/application/commission-transfer.service';
 import { MonimeWebhookReceiver } from '../../webhooks/application/monime-webhook.receiver';
+import { normalizePublicRef } from '../../payments/domain/payment-ref';
 
 export interface Page<T> {
   items: T[];
@@ -45,7 +46,7 @@ export class AdminOpsService {
     return admin.departmentScoped ? { obligation: { payer: { department: { in: [...admin.departments] } } } } : {};
   }
 
-  async listPayments(admin: AdminPrincipal, q: { limit: number; cursor?: string; status?: string; channel?: string; feeType?: string; payerRef?: string; from?: string; to?: string }) {
+  async listPayments(admin: AdminPrincipal, q: { limit: number; cursor?: string; status?: string; channel?: string; feeType?: string; payerRef?: string; ref?: string; from?: string; to?: string }) {
     const where: Prisma.PaymentWhereInput = {
       AND: [
         this.paymentScope(admin),
@@ -53,6 +54,7 @@ export class AdminOpsService {
         q.channel ? { channel: q.channel as never } : {},
         q.feeType ? { obligation: { fee: { feeType: { code: q.feeType } } } } : {},
         q.payerRef ? { obligation: { payer: { ref: q.payerRef } } } : {},
+        q.ref ? refFilter(q.ref) : {},
         q.from || q.to ? { createdAt: { ...(q.from ? { gte: new Date(q.from) } : {}), ...(q.to ? { lt: new Date(q.to) } : {}) } } : {},
       ],
     };
@@ -266,6 +268,13 @@ export class AdminOpsService {
 }
 
 type PaymentRow = Prisma.PaymentGetPayload<{ include: { obligation: { include: { payer: true; fee: { include: { feeType: true } } } }; receipt: true } }>;
+
+/** Matches what a payer or Monime support quotes: our ref, Monime's order number, or spm-… id. */
+function refFilter(raw: string): Prisma.PaymentWhereInput {
+  const v = raw.trim();
+  const ref = normalizePublicRef(v);
+  return { OR: [{ monimePaymentId: v }, ...(ref ? [{ paymentRef: ref }, { monimeOrderNumber: ref }] : [])] };
+}
 
 function presentPayment(p: PaymentRow) {
   const { obligation: o, receipt, ...rest } = p;

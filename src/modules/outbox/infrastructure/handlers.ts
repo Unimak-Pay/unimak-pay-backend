@@ -1,22 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PORTAL_CLIENT, type PortalClient } from '../../integrations/portal/portal.port';
-import { SMS_SENDER, type SmsSender } from '../../integrations/sms/sms.port';
 import { CommissionTransferService } from '../../treasury/application/commission-transfer.service';
 import type { OutboxHandler } from '../application/outbox-handler';
 import type {
   CommissionTransferPayload,
   PortalApplicationPaidPayload,
-  SmsReceiptPayload,
 } from '../domain/messages';
-
-@Injectable()
-export class SmsReceiptHandler implements OutboxHandler<'sms.receipt'> {
-  readonly type = 'sms.receipt' as const;
-  constructor(@Inject(SMS_SENDER) private readonly sms: SmsSender) {}
-  handle(p: SmsReceiptPayload): Promise<void> {
-    return this.sms.send(p.phone, p.text);
-  }
-}
 
 @Injectable()
 export class PortalApplicationPaidHandler implements OutboxHandler<'portal.application_paid'> {

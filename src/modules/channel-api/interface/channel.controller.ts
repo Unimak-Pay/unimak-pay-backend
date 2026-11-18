@@ -4,13 +4,13 @@ import { LookupPayerUseCase } from '../../payers/application/lookup-payer.use-ca
 import { PayerObligationsQuery } from '../../payers/application/payer-obligations.query';
 import { InitiatePaymentUseCase } from '../../payments/application/initiate-payment.use-case';
 import { PAYMENT_REPOSITORY, type PaymentRepository } from '../../payments/application/payment.repository';
+import { PaymentStatusQuery } from '../../payments/application/payment-status.query';
 import { QuotePaymentUseCase } from '../../payments/application/quote-payment.use-case';
 import { ReceiptsQuery } from '../../receipts/application/receipts.query';
-import { ResendReceiptUseCase } from '../../receipts/application/resend-receipt.use-case';
 import { ChannelAuthGuard, type ChannelRequest } from './channel-auth.guard';
 import { CreatePaymentDto, QuoteDto } from './dto';
 import { PayerKindPipe, RefPipe } from './payer-kind.pipe';
-import { presentObligation, presentPayer, presentPayment, presentReceipt } from './presenters';
+import { presentObligation, presentPayer, presentPayment, presentPaymentStatus, presentReceipt } from './presenters';
 
 @Controller('v1/channel')
 @UseGuards(ChannelAuthGuard)
@@ -21,7 +21,7 @@ export class ChannelController {
     private readonly quote: QuotePaymentUseCase,
     private readonly initiate: InitiatePaymentUseCase,
     private readonly receipts: ReceiptsQuery,
-    private readonly resend: ResendReceiptUseCase,
+    private readonly paymentStatus: PaymentStatusQuery,
     @Inject(PAYMENT_REPOSITORY) private readonly payments: PaymentRepository,
   ) {}
 
@@ -63,7 +63,18 @@ export class ChannelController {
       idempotencyKey: dto.idempotencyKey,
     });
     const v = presentPayment(p);
-    return { paymentId: v.paymentId, status: v.status, expiresAt: v.expiresAt, ussdCode: v.ussdCode };
+    return { paymentId: v.paymentId, paymentRef: v.paymentRef, status: v.status, expiresAt: v.expiresAt, ussdCode: v.ussdCode };
+  }
+
+  /**
+   * Status by what the payer holds: our 8-digit payment ref or Monime's order
+   * number (from Monime's SMS). Any channel's payment, payer details masked.
+   */
+  @Get('payments/status/:ref')
+  async getPaymentStatus(@Param('ref') ref: string) {
+    const v = await this.paymentStatus.byPublicRef(ref.slice(0, 40));
+    if (!v) throw new NotFoundException('Payment not found');
+    return presentPaymentStatus(v);
   }
 
   @Get('payments/:id')
@@ -77,12 +88,5 @@ export class ChannelController {
   async getReceipts(@Param('kind', PayerKindPipe) kind: PayerKind, @Param('ref', RefPipe) ref: string) {
     const { payer } = await this.lookup.execute(kind, ref);
     return { receipts: (await this.receipts.forPayer(payer.id)).map(presentReceipt) };
-  }
-
-  @Post('receipts/:number/resend')
-  @HttpCode(202)
-  resendReceipt(@Param('number') number: string) {
-    if (!/^UNIMAK-\d{4}-\d{6}$/.test(number)) throw new NotFoundException('Receipt not found');
-    return this.resend.execute(number);
   }
 }

@@ -7,8 +7,6 @@ import { MONIME_CLIENT } from './monime/monime.port';
 import { HttpPortalClient } from './portal/http-portal.client';
 import { MockPortalClient } from './portal/mock-portal.client';
 import { PORTAL_CLIENT } from './portal/portal.port';
-import { ConsoleSmsSender } from './sms/console-sms.sender';
-import { SMS_SENDER } from './sms/sms.port';
 
 @Global()
 @Module({
@@ -34,9 +32,7 @@ import { SMS_SENDER } from './sms/sms.port';
             })
           : new MockMonimeClient(prisma),
     },
-    // TODO: real SMS provider adapter; console sender in all environments for now.
-    { provide: SMS_SENDER, useValue: new ConsoleSmsSender() },
   ],
-  exports: [PORTAL_CLIENT, MONIME_CLIENT, SMS_SENDER],
+  exports: [PORTAL_CLIENT, MONIME_CLIENT],
 })
 export class IntegrationsModule {}

@@ -77,13 +77,13 @@ export class MockMonimeClient implements MonimeClient {
   }
 
   /** Dev helper: what Monime records when a collection completes. */
-  async recordPayment(p: { id: string; amount: bigint; financialAccountId: string | null; reference: string | null; metadata: Record<string, string>; ownerId: string | null; fees: bigint; payerPhone: string | null; createTime?: Date }): Promise<void> {
+  async recordPayment(p: { id: string; amount: bigint; financialAccountId: string | null; reference: string | null; metadata: Record<string, string>; ownerId: string | null; fees: bigint; payerPhone: string | null; orderNumber?: string | null; createTime?: Date }): Promise<void> {
     const at = p.createTime ?? new Date();
     await this.prisma.mockMonimeRecord.upsert({
       where: { id: p.id },
       create: {
         id: p.id, kind: 'PAYMENT', status: 'completed', amount: p.amount, createdAt: at,
-        data: { financialAccountId: p.financialAccountId, reference: p.reference, metadata: p.metadata, ownerId: p.ownerId, fees: p.fees.toString(), payerPhone: p.payerPhone, createTime: at.toISOString() },
+        data: { financialAccountId: p.financialAccountId, reference: p.reference, metadata: p.metadata, ownerId: p.ownerId, fees: p.fees.toString(), payerPhone: p.payerPhone, orderNumber: p.orderNumber ?? null, createTime: at.toISOString() },
       },
       update: {},
     });
@@ -219,6 +219,7 @@ export class MockMonimeClient implements MonimeClient {
       ownerId: (d['ownerId'] as string | null) ?? null,
       fees: BigInt((d['fees'] as string | undefined) ?? '0'),
       payerPhone: (d['payerPhone'] as string | null) ?? null,
+      orderNumber: (d['orderNumber'] as string | null) ?? null,
       createTime: new Date((d['createTime'] as string | undefined) ?? r.createdAt),
       updateTime: null,
     };

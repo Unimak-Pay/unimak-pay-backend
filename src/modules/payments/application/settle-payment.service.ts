@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { AppConfig } from '../../../config/app-config';
 import type { Minor } from '../../../shared/domain/money';
 import type { Db } from '../../../shared/infrastructure/prisma.service';
 import { APPLICATION_FEE_CODE } from '../../catalog/domain/fee';
@@ -8,7 +7,7 @@ import { computePosition } from '../../ledger/domain/position';
 import { OutboxWriter } from '../../outbox/application/outbox-writer';
 import type { OutboxMessageInput } from '../../outbox/domain/messages';
 import { ReceiptIssuer } from '../../receipts/application/receipt-issuer';
-import { receiptSmsText } from '../../receipts/application/receipt-sms';
+import { resolvePayerPhone } from '../domain/payer-phone';
 import { canTransition, isLateSettlement } from '../domain/payment-status';
 import { PAYMENT_REPOSITORY, type PaymentRecord, type PaymentRepository } from './payment.repository';
 
@@ -29,8 +28,10 @@ export interface CompletedMonimePayment {
   metadata: Record<string, string>;
   /** the object that owns the payment — normally what we created at initiation */
   ownerId: string | null;
-  /** number that actually paid (from the payment channel), if known */
+  /** channel number as Monime reports it (usually masked: +23276****56) */
   payerPhone?: string | null;
+  /** Monime order number (in Monime's own SMS to the payer) */
+  orderNumber?: string | null;
   occurredAt: Date;
 }
 
@@ -40,9 +41,10 @@ export type { SettlementOutcome, SettlementResult } from './settlement-result';
 /**
  * Applies payment.processing_completed inside the caller's transaction.
  * Only this path marks a payment COMPLETED. In one transaction:
- *   payment → COMPLETED, ledger PAYMENT (unique on paymentId), obligation PAID if
- *   cleared, receipt, outbox (sms.receipt, portal.application_paid for APP,
- *   monime.commission_transfer when platformFee > 0).
+ *   payment → COMPLETED (+ the number that paid, Monime's order number), ledger
+ *   PAYMENT (unique on paymentId), obligation PAID if cleared, receipt, outbox
+ *   (portal.application_paid for APP, monime.commission_transfer when
+ *   platformFee > 0). No SMS from us: Monime texts the payer on completion.
  * Business mismatches don't throw: they come back UNMATCHED with a note for
  * reconciliation (Monime gets 200 and stops redelivering).
  */
@@ -51,7 +53,6 @@ export class SettlePaymentService {
   private readonly logger = new Logger(SettlePaymentService.name);
 
   constructor(
-    private readonly config: AppConfig,
     private readonly receipts: ReceiptIssuer,
     private readonly outbox: OutboxWriter,
     @Inject(PAYMENT_REPOSITORY) private readonly payments: PaymentRepository,
@@ -113,7 +114,11 @@ export class SettlePaymentService {
     const completedAt = ev.occurredAt;
     await this.payments.update(
       p.id,
-      { status: 'COMPLETED', completedAt, monimePaymentId: ev.monimePaymentId, failureReason: null },
+      {
+        status: 'COMPLETED', completedAt, monimePaymentId: ev.monimePaymentId, failureReason: null,
+        monimeOrderNumber: ev.orderNumber ?? null,
+        payerPhone: resolvePayerPhone({ metadata: ev.metadata, reported: ev.payerPhone, current: p.payerPhone }),
+      },
       tx,
     );
     await this.ledger.append(
@@ -132,29 +137,7 @@ export class SettlePaymentService {
       paymentId: p.id, payerId: o.payerId, obligationId: o.id, amount: p.amount, issuedAt: completedAt,
     });
 
-    const messages: OutboxMessageInput[] = [
-      {
-        type: 'sms.receipt',
-        dedupeKey: `sms.receipt:${p.id}`,
-        payload: {
-          phone: p.payerPhone,
-          receiptNumber: receipt.number,
-          text: receiptSmsText({
-            amount: p.amount, feeName: o.feeName, payerRef: o.payerRef, receiptNumber: receipt.number,
-            balance: position.balance, verifyUrl: `${this.config.get('PUBLIC_BASE_URL')}/r/${receipt.verifyCode}`,
-          }),
-        },
-      },
-    ];
-    // Spec: the receipt goes to the paying phone and to the phone on the portal record.
-    const first = messages[0]!;
-    const extra: [string, string | null | undefined][] = [['channel', ev.payerPhone], ['portal', o.payerPortalPhone]];
-    const sent = new Set([p.payerPhone]);
-    for (const [tag, phone] of extra) {
-      if (!phone || sent.has(phone)) continue;
-      sent.add(phone);
-      messages.push({ ...first, dedupeKey: `sms.receipt:${p.id}:${tag}`, payload: { ...first.payload, phone } } as OutboxMessageInput);
-    }
+    const messages: OutboxMessageInput[] = [];
     if (o.feeTypeCode === APPLICATION_FEE_CODE) {
       messages.push({
         type: 'portal.application_paid',

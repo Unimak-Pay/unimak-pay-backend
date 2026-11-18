@@ -9,6 +9,7 @@ export const PAGES = {
   idType: 'id_type',
   enterStudentId: 'enter_student_id',
   enterApplicationRef: 'enter_application_ref',
+  enterPaymentRef: 'enter_payment_ref',
   tryAgain: 'try_again',
   confirmPayer: 'confirm_payer',
   selectFee: 'select_fee',
@@ -20,7 +21,7 @@ export const PAGES = {
 } as const;
 export type PageId = (typeof PAGES)[keyof typeof PAGES];
 
-export type Intent = 'pay' | 'balance' | 'resend';
+export type Intent = 'pay' | 'balance' | 'status';
 
 /** Server-side session state; flowData from Monime is only input, never state. */
 export interface SessionState {

@@ -8,7 +8,7 @@
  *     metadata, fees: [{ code, amount }], ownershipGraph: { owner: { id, type, metadata } } }
  * All payload-shape knowledge lives in this file.
  */
-import { toInternationalMsisdn } from '../../../shared/domain/phone';
+import { reportedMsisdn } from '../../../shared/domain/phone';
 
 export const PAYMENT_COMPLETED_EVENT = 'payment.processing_completed';
 
@@ -41,8 +41,10 @@ export interface ParsedCompletedPayment {
   metadata: Record<string, string>;
   ownerId: string | null;
   ownerType: string | null;
-  /** the paying number (channel.phoneNumber for momo), international format */
+  /** channel.phoneNumber as Monime reports it: usually masked (+23276****56) */
   payerPhone: string | null;
+  /** Monime order number (the one in Monime's SMS to the payer) */
+  orderNumber: string | null;
 }
 
 export class InvalidWebhookPayloadError extends Error {
@@ -88,7 +90,8 @@ export function parseCompletedPayment(env: MonimeWebhookEnvelope): ParsedComplet
     metadata: { ...asStringRecord(owner['metadata']), ...asStringRecord(data['metadata']) },
     ownerId: asString(owner['id']),
     ownerType: asString(owner['type']),
-    payerPhone: toInternationalMsisdn(asString(optionalRecord(data['channel'])['phoneNumber']) ?? ''),
+    payerPhone: reportedMsisdn(asString(optionalRecord(data['channel'])['phoneNumber'])),
+    orderNumber: asString(data['orderNumber']),
   };
 }
 

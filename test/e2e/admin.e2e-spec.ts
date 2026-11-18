@@ -185,7 +185,7 @@ describe('money operations behind admin auth', () => {
   });
 
   it('retries DEAD outbox messages', async () => {
-    const msg = await prisma.outboxMessage.findFirstOrThrow({ where: { type: 'sms.receipt', status: 'SENT' } });
+    const msg = await prisma.outboxMessage.findFirstOrThrow({ where: { type: 'monime.commission_transfer', status: 'SENT' } }); // re-sending is idempotent on the payment
     await prisma.outboxMessage.update({ where: { id: msg.id }, data: { status: 'DEAD', attempts: 6 } });
     const b = await admin('BURSAR');
     const res = await post(`/v1/admin/outbox/${msg.id}/retry`, b.token).expect(200);

@@ -8,8 +8,8 @@ import { LookupPayerUseCase } from '../../payers/application/lookup-payer.use-ca
 import { PayerObligationsQuery } from '../../payers/application/payer-obligations.query';
 import { type Payer, programLine } from '../../payers/domain/payer';
 import { InitiatePaymentUseCase } from '../../payments/application/initiate-payment.use-case';
-import { ReceiptsQuery } from '../../receipts/application/receipts.query';
-import { ResendReceiptUseCase } from '../../receipts/application/resend-receipt.use-case';
+import { PaymentStatusQuery, type PaymentStatusView } from '../../payments/application/payment-status.query';
+import { ussdSubscriberIdFor } from '../../../shared/domain/phone';
 import {
   type ExchangeReply, type ExchangeRequest, type Intent, MAX_AMOUNT_RETRIES, MAX_ID_RETRIES, PAGES, type PageId,
   parseSleInput, type SessionState, sleShort, toMajorAmount,
@@ -24,7 +24,8 @@ const go = (pageId: PageId, pageData: Record<string, unknown> = {}): ExchangeRep
  * The spec's USSD menu as a state machine over the flow's pages:
  *   home → id_type → enter_student_id | enter_application_ref → confirm_payer
  *        → select_fee → [enter_amount] → confirm_payment → make_payment (collect_payment)
- * plus Check balance, Resend last receipt, Help; try_again for wrong IDs/amounts.
+ * plus Check balance, Check payment status (our ref or Monime's order number),
+ * Help; try_again for wrong IDs/amounts. No SMS from us: Monime texts the payer.
  * flowData is untrusted: a page is only accepted when the server-side session
  * expects it, and every value is re-validated against our records.
  */
@@ -38,8 +39,7 @@ export class UssdFlowService {
     private readonly lookup: LookupPayerUseCase,
     private readonly obligations: PayerObligationsQuery,
     private readonly initiate: InitiatePaymentUseCase,
-    private readonly receipts: ReceiptsQuery,
-    private readonly resend: ResendReceiptUseCase,
+    private readonly paymentStatus: PaymentStatusQuery,
   ) {}
 
   async handle(req: ExchangeRequest): Promise<ExchangeReply> {
@@ -60,11 +60,12 @@ export class UssdFlowService {
         case PAGES.idType: return await this.idType(sessionId, state, input);
         case PAGES.enterStudentId:
         case PAGES.enterApplicationRef: return await this.enterId(sessionId, subscriberId, state, input);
+        case PAGES.enterPaymentRef: return await this.enterPaymentRef(sessionId, subscriberId, state, input);
         case PAGES.tryAgain: return await this.tryAgain(sessionId, state, input);
         case PAGES.confirmPayer: return await this.confirmPayer(sessionId, state, input);
         case PAGES.selectFee: return await this.selectFee(sessionId, state, input);
         case PAGES.enterAmount: return await this.enterAmount(sessionId, state, input);
-        case PAGES.confirmPayment: return await this.confirmPayment(sessionId, state, input);
+        case PAGES.confirmPayment: return await this.confirmPayment(sessionId, subscriberId, state, input);
         default: return stop(EXPIRED);
       }
     } catch (err) {
@@ -78,8 +79,9 @@ export class UssdFlowService {
   /** First exchange of a session (the home menu is static in the flow). */
   private async home(sessionId: string, subscriberId: string, input: string): Promise<ExchangeReply> {
     if (input === 'help') return stop(this.config.get('USSD_HELP_MESSAGE'));
-    if (input !== 'pay' && input !== 'balance' && input !== 'resend') return stop('Invalid option.');
-    const state: SessionState = { expect: PAGES.idType, intent: input as Intent, idAttempts: 0, amountAttempts: 0 };
+    if (input !== 'pay' && input !== 'balance' && input !== 'status') return stop('Invalid option.');
+    const first = input === 'status' ? PAGES.enterPaymentRef : PAGES.idType;
+    const state: SessionState = { expect: first, intent: input as Intent, idAttempts: 0, amountAttempts: 0 };
     const existing = await this.prisma.ussdSession.findUnique({ where: { id: sessionId } });
     if (existing && existing.subscriberId !== subscriberId) return stop(EXPIRED);
     await this.prisma.ussdSession.upsert({
@@ -87,7 +89,7 @@ export class UssdFlowService {
       create: { id: sessionId, subscriberId, state: json(state) },
       update: { state: json(state) },
     });
-    return go(PAGES.idType);
+    return go(first);
   }
 
   private async idType(id: string, state: SessionState, input: string): Promise<ExchangeReply> {
@@ -124,7 +126,6 @@ export class UssdFlowService {
 
     const next: SessionState = { ...state, ref: payer.ref };
     if (state.intent === 'balance') return this.finish(id, next, await this.balanceText(payer));
-    if (state.intent === 'resend') return this.finish(id, next, await this.resendLast(payer));
     await this.save(id, { ...next, expect: PAGES.confirmPayer });
     return go(PAGES.confirmPayer, { payer_name: maskName(payer.fullName), program_line: programLine(payer) });
   }
@@ -173,12 +174,13 @@ export class UssdFlowService {
     return this.toConfirm(id, { ...state, amount: amount.toString() });
   }
 
-  private async confirmPayment(id: string, state: SessionState, input: string): Promise<ExchangeReply> {
+  private async confirmPayment(id: string, subscriberId: string, state: SessionState, input: string): Promise<ExchangeReply> {
     if (input !== 'confirm') {
       await this.save(id, { ...state, expect: 'done' });
       return go(PAGES.paymentCancelled);
     }
     const payer = await this.payer(state);
+    const payingNumber = payer.phone && ussdSubscriberIdFor(payer.phone) === subscriberId ? payer.phone : null;
     const account = await this.prisma.obligation.findUnique({
       where: { id: state.obligationId! },
       select: { fee: { select: { name: true, feeType: { select: { account: true } } } } },
@@ -190,9 +192,10 @@ export class UssdFlowService {
       clientId: USSD_CLIENT_ID,
       obligationId: state.obligationId!,
       amount: BigInt(state.amount!),
-      // The paying number arrives with the completed payment (channel.phoneNumber);
-      // until then the receipt target is the phone on the portal record.
-      payerPhone: payer.phone,
+      // The number paying is the one dialling. Monime only gives us an opaque
+      // subscriberId (uuidv5 of the number), so we know it only when it's the
+      // portal phone; otherwise settlement records what Monime reports.
+      payerPhone: payingNumber,
       phoneAuthorized: false,
       channel: 'USSD',
       collection: 'USSD_FLOW',
@@ -214,6 +217,7 @@ export class UssdFlowService {
       // no page data: its text is static in the flow template.
       fee_name: state.feeName!,
       amount_display: amountDisplay,
+      payment_ref: payment.paymentRef,
     });
   }
 
@@ -245,11 +249,20 @@ export class UssdFlowService {
     return lines.length ? `${maskName(payer.fullName)}\n${lines.join('\n')}` : `${maskName(payer.fullName)}: all clear.`;
   }
 
-  private async resendLast(payer: Payer): Promise<string> {
-    const [last] = await this.receipts.forPayer(payer.id);
-    if (!last) return 'No receipts found.';
-    await this.resend.execute(last.number);
-    return `Receipt ${last.number} sent by SMS.`;
+  /** Status by our payment ref or Monime's order number; rate-limited like ID lookups. */
+  private async enterPaymentRef(id: string, subscriberId: string, state: SessionState, input: string): Promise<ExchangeReply> {
+    if ((await this.lookupsInWindow(subscriberId)) >= this.config.get('USSD_MAX_LOOKUPS_PER_15_MIN')) {
+      return stop('Too many lookups. Please try again later.');
+    }
+    await this.prisma.ussdSession.update({ where: { id }, data: { lookups: { increment: 1 } } });
+    const view = await this.paymentStatus.byPublicRef(input);
+    if (!view) {
+      const attempts = state.idAttempts + 1;
+      if (attempts > MAX_ID_RETRIES) return this.finish(id, state, 'Payment not found. Check the ref and try again later.');
+      const shown = input.trim().slice(0, 20) || '(empty)';
+      return this.offerRetry(id, { ...state, idAttempts: attempts }, `Payment ${shown} not found.`, PAGES.enterPaymentRef, {});
+    }
+    return this.finish(id, state, paymentStatusText(view));
   }
 
   private async payer(state: SessionState): Promise<Payer> {
@@ -290,4 +303,21 @@ function friendly(err: DomainError): string {
       return /in progress/.test(err.message) ? 'A payment for this fee is already in progress.' : 'This fee cannot be paid right now. Please contact the finance office.';
     default: return 'Something went wrong. Please try again.';
   }
+}
+
+const STATUS_LINE: Record<PaymentStatusView['status'], string> = {
+  COMPLETED: 'PAID',
+  PENDING: 'PENDING - waiting for confirmation',
+  INITIATED: 'PENDING - waiting for confirmation',
+  EXPIRED: 'NOT COMPLETED (expired). If money left your wallet it will be applied automatically.',
+  FAILED: 'FAILED. Nothing was applied.',
+};
+
+export function paymentStatusText(v: PaymentStatusView): string {
+  return [
+    `Payment ${v.paymentRef}: ${STATUS_LINE[v.status]}`,
+    `${sleShort(v.amount)} ${v.feeName}`,
+    `${v.maskedName} (${v.payerRef})`,
+    ...(v.receiptNumber ? [`Receipt ${v.receiptNumber}`] : []),
+  ].join('\n');
 }

@@ -130,7 +130,7 @@ describe('HttpMonimeClient payments listing', () => {
         result: [{
           id: 'pay-1', status: 'completed', amount: { currency: 'SLE', value: 15000 }, financialAccountId: 'fac-app', reference: 'p-1',
           metadata: { payment_id: 'p-1' }, fees: [{ code: 'x', amount: { currency: 'SLE', value: 150 } }],
-          channel: { type: 'momo', phoneNumber: '23276123456' }, ownershipGraph: { owner: { id: 'pmc-1', metadata: { a: 'b' } } },
+          channel: { type: 'momo', phoneNumber: '23276123456' }, orderNumber: 'ORD123456', ownershipGraph: { owner: { id: 'pmc-1', metadata: { a: 'b' } } },
           createTime: '2026-11-17T10:00:00Z',
         }],
       },
@@ -140,7 +140,7 @@ describe('HttpMonimeClient payments listing', () => {
     expect(page.next).toBe('cur-2');
     expect(page.items[0]).toEqual({
       id: 'pay-1', status: 'completed', currency: 'SLE', amount: 15000n, financialAccountId: 'fac-app', reference: 'p-1',
-      metadata: { a: 'b', payment_id: 'p-1' }, ownerId: 'pmc-1', fees: 150n, payerPhone: '+23276123456',
+      metadata: { a: 'b', payment_id: 'p-1' }, ownerId: 'pmc-1', fees: 150n, payerPhone: '+23276123456', orderNumber: 'ORD123456',
       createTime: new Date('2026-11-17T10:00:00Z'), updateTime: null,
     });
   });

@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { toInternationalMsisdn } from '../../../shared/domain/phone';
+import { reportedMsisdn } from '../../../shared/domain/phone';
 import {
   type BankView,
   type CreateFinancialAccountInput,
@@ -80,6 +80,7 @@ interface WirePayment {
   metadata?: Record<string, unknown> | null;
   fees?: WireFee[] | null;
   channel?: { type?: string; phoneNumber?: string } | null;
+  orderNumber?: string | null;
   ownershipGraph?: { owner?: { id?: string; metadata?: Record<string, unknown> | null } | null } | null;
   createTime: string;
   updateTime?: string | null;
@@ -354,7 +355,8 @@ function toPaymentRecord(p: WirePayment): MonimePaymentRecord {
     metadata: { ...stringRecord(owner?.metadata), ...stringRecord(p.metadata) },
     ownerId: owner?.id ?? null,
     fees: (p.fees ?? []).filter((f) => f.amount?.currency === p.amount.currency).reduce((s, f) => s + BigInt(f.amount.value), 0n),
-    payerPhone: toInternationalMsisdn(p.channel?.phoneNumber ?? ''),
+    payerPhone: reportedMsisdn(p.channel?.phoneNumber),
+    orderNumber: p.orderNumber ?? null,
     createTime: new Date(p.createTime),
     updateTime: p.updateTime ? new Date(p.updateTime) : null,
   };

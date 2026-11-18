@@ -57,12 +57,15 @@ describe('Monime webhook parsing', () => {
       fees: [{ code: 'processing', amount: { currency: 'SLE', value: 150 } }, { code: 'x', amount: { currency: 'USD', value: 9 } }],
       ownershipGraph: { owner: { id: 'pmc-1', type: 'payment_code', metadata: { paymentId: 'from-owner', source: 'ussd' } } },
       metadata: { paymentId: 'from-payment', n: 3 },
+      // as in a real payload: Monime masks the paying number
+      channel: { type: 'momo', provider: 'm17', phoneNumber: '+23276****56' },
+      orderNumber: '3BMRXXXQXJW3',
     })));
     expect(parsed).toEqual({
       monimePaymentId: 'spm-1', financialAccountId: 'fa-unimak-application', currency: 'SLE', amount: 15_000n, fees: 150n,
       reference: '11111111-2222-3333-4444-555555555555',
       metadata: { paymentId: 'from-payment', source: 'ussd', n: '3' },
-      ownerId: 'pmc-1', ownerType: 'payment_code', payerPhone: null,
+      ownerId: 'pmc-1', ownerType: 'payment_code', payerPhone: '+23276****56', orderNumber: '3BMRXXXQXJW3',
     });
   });
 

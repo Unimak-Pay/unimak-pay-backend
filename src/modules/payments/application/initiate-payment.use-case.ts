@@ -13,7 +13,8 @@ export interface InitiatePaymentInput {
   clientId: string;
   obligationId: string;
   amount: Minor;
-  payerPhone: string;
+  /** the number that will pay, when known (Dots: given; USSD: only if verified) */
+  payerPhone: string | null;
   channel: Channel;
   idempotencyKey: string;
   /** restrict the payment code to payerPhone (default true) */
@@ -112,9 +113,14 @@ export class InitiatePaymentUseCase {
         amount: p.amount,
         durationMinutes: minutesLeft,
         reference: p.id,
-        authorizedPhoneNumber: p.phoneAuthorized ? p.payerPhone : undefined,
+        authorizedPhoneNumber: p.phoneAuthorized && p.payerPhone ? p.payerPhone : undefined,
         financialAccountId: o.settlementAccount!,
-        metadata: { paymentId: p.id, obligationId: o.id, payerRef: o.payerRef, feeTypeCode: o.feeTypeCode, channel: p.channel },
+        metadata: {
+          paymentId: p.id, paymentRef: p.paymentRef, obligationId: o.id, payerRef: o.payerRef, feeTypeCode: o.feeTypeCode, channel: p.channel,
+          // Monime masks the paying number in the webhook; an authorised code can only
+          // be paid from this number, so it comes back whole in metadata.
+          ...(p.phoneAuthorized && p.payerPhone ? { payer_phone: p.payerPhone } : {}),
+        },
       });
       return await this.transitionAfterInitiate(p.id, { status: 'PENDING', monimeRef: code.id, ussdCode: code.ussdCode ?? undefined });
     } catch (err) {

@@ -242,7 +242,11 @@ model Payment {
   /// channel API client that created it (idempotency scope)
   clientId        String
   idempotencyKey  String
-  payerPhone      String
+  /// short ref shown to the payer (8 digits) for status checks
+  paymentRef      String        @unique
+  /// number that actually paid: full when known (verified or from metadata),
+  /// else Monime's masked one (+23276****56); null until known
+  payerPhone      String?
   /// payment code restricted to payerPhone
   phoneAuthorized Boolean       @default(true)
   collectionMethod CollectionMethod @default(PAYMENT_CODE)
@@ -253,6 +257,8 @@ model Payment {
   ussdCode        String?
   /// Monime Payment id (spm-…) from payment.processing_completed
   monimePaymentId String?       @unique
+  /// Monime order number from the completed payment (sent to the payer by Monime SMS)
+  monimeOrderNumber String?
   pricingConfigId String        @db.Uuid
   monimeFee       BigInt
   platformFee     BigInt
@@ -271,6 +277,7 @@ model Payment {
   @@unique([clientId, idempotencyKey])
   @@index([obligationId, status])
   @@index([status, expiresAt])
+  @@index([monimeOrderNumber])
 }
 
 enum WebhookEventStatus {

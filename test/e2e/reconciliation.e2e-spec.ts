@@ -150,7 +150,9 @@ describe('nightly reconciliation against Monime', () => {
     const cron = () => http.get('/cron/reconcile').set('authorization', `Bearer ${process.env.CRON_SECRET}`).expect(200);
     const first = await cron();
     const second = await cron();
-    expect(second.body).toEqual({ skipped: true, runId: expect.any(String) });
+    expect(second.body).toMatchObject({ skipped: true, runId: expect.any(String) });
     expect(first.body.id ?? first.body.runId).toBeTruthy();
+    // daily-cron plans: the same call does the 5-minute housekeeping
+    expect(first.body).toMatchObject({ housekeeping: { expired: expect.any(Number) }, outbox: { claimed: expect.any(Number) } });
   });
 });

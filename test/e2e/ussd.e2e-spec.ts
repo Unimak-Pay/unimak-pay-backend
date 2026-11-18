@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { createApp } from '../../src/bootstrap';
 import { ProvisionAccountsUseCase } from '../../src/modules/treasury/application/provision-accounts.use-case';
+import { ussdSubscriberIdFor } from '../../src/shared/domain/phone';
 import { decryptReply, encryptAsMonime } from '../../src/modules/ussd/domain/exchange-crypto';
 import { monimeEvent } from './helpers';
 
@@ -31,7 +32,7 @@ async function exchange(session: string, currentPage: string, flowData: Record<s
 }
 
 /** A USSD session that accumulates flowData like Monime does (keyed by page id). */
-function session(subscriberId = SUBSCRIBER) {
+function session(subscriberId: string = SUBSCRIBER) {
   const id = `sess-${randomUUID()}`;
   const flow: Record<string, string> = {};
   return {
@@ -43,7 +44,7 @@ function session(subscriberId = SUBSCRIBER) {
   };
 }
 
-async function toPayer(intent: string, kind: 'student' | 'applicant', ref: string, subscriberId = SUBSCRIBER) {
+async function toPayer(intent: string, kind: 'student' | 'applicant', ref: string, subscriberId: string = SUBSCRIBER) {
   const s = session(subscriberId);
   expect(await s.step('home', intent)).toEqual({ action: 'navigate', pageId: 'id_type', pageData: {} });
   const prompt = await s.step('id_type', kind);
@@ -166,10 +167,13 @@ describe('USSD payment journey (collect_payment)', () => {
         financial_account_id: tuition.monimeId,
         fee_name: 'Tuition 2026/27',
         amount_display: 'SLE 2,500',
+        payment_ref: p.paymentRef,
       },
     });
-    // a PENDING hold, no payment code: collection happens inside the USSD session
-    expect(p).toMatchObject({ amount: 250_000n, channel: 'USSD', status: 'PENDING', collectionMethod: 'USSD_FLOW', monimeRef: null, payerPhone: '+23230200005' });
+    expect(p.paymentRef).toMatch(/^[1-9]\d{7}$/);
+    // a PENDING hold, no payment code: collection happens inside the USSD session.
+    // This subscriber isn't the portal phone, so the paying number is unknown yet.
+    expect(p).toMatchObject({ amount: 250_000n, channel: 'USSD', status: 'PENDING', collectionMethod: 'USSD_FLOW', monimeRef: null, payerPhone: null });
     paymentId = p.id;
 
     // a repeated submit does not create a second payment
@@ -177,22 +181,52 @@ describe('USSD payment journey (collect_payment)', () => {
     expect(await prisma.payment.count({ where: { idempotencyKey: { startsWith: s.id } } })).toBe(1);
   });
 
-  it('settles from payment.processing_completed; receipt goes to the paying phone and the portal phone', async () => {
+  it('settles from payment.processing_completed; records the masked paying number and the order number, sends no SMS', async () => {
     const res = await monimeEvent(http, 'payment.processing_completed', { id: 'pay-ussd-1', type: 'payment' }, {
       id: 'pay-ussd-1', status: 'completed', amount: { currency: 'SLE', value: 250000 },
-      channel: { type: 'momo', provider: 'm17', phoneNumber: '23276123456' },
+      channel: { type: 'momo', provider: 'm17', phoneNumber: '+23276****56' },
+      orderNumber: 'USSD1ORDER01',
       financialAccountId: 'fac-mock-unimak-fee-tuition', reference: paymentId,
       metadata: { payment_id: paymentId, financial_account_id: 'fac-mock-unimak-fee-tuition' },
       fees: [{ code: 'processing', amount: { currency: 'SLE', value: 2500 } }],
     }).expect(200);
     expect(res.body.result).toBe('PROCESSED');
-    const sms = await prisma.outboxMessage.findMany({ where: { dedupeKey: { startsWith: `sms.receipt:${paymentId}` } } });
-    expect(sms.map((m) => (m.payload as { phone: string }).phone).sort()).toEqual(['+23230200005', '+23276123456']);
+    expect(await prisma.payment.findUnique({ where: { id: paymentId } })).toMatchObject({ status: 'COMPLETED', payerPhone: '+23276****56', monimeOrderNumber: 'USSD1ORDER01' });
+    expect(await prisma.outboxMessage.count({ where: { dedupeKey: { contains: paymentId }, type: { startsWith: 'sms' } } })).toBe(0);
   });
 
-  it('resend last receipt', async () => {
-    const { reply } = await toPayer('resend', 'student', 'UNI-2026-0005');
-    expect(reply).toMatchObject({ action: 'stop', message: expect.stringMatching(/^Receipt UNIMAK-\d{4}-\d{6} sent by SMS\.$/) });
+  it('checks a payment status by our payment ref or by Monime order number', async () => {
+    const p = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { receipt: true } });
+    const phone = randomUUID(); // its own subscriber: status checks count toward the lookup limit
+    const byRef = session(phone);
+    expect(await byRef.step('home', 'status')).toEqual({ action: 'navigate', pageId: 'enter_payment_ref', pageData: {} });
+    expect(await byRef.step('enter_payment_ref', ` ${p.paymentRef} `)).toEqual({
+      action: 'stop',
+      message: `Payment ${p.paymentRef}: PAID\nSLE 2,500 Tuition 2026/27\nI*** K*** (UNI-2026-0005)\nReceipt ${p.receipt!.number}`,
+    });
+    const byOrder = session(phone);
+    await byOrder.step('home', 'status');
+    expect(await byOrder.step('enter_payment_ref', 'ussd1-order01')).toMatchObject({ action: 'stop', message: expect.stringMatching(new RegExp(`^Payment ${p.paymentRef}: PAID`)) });
+    const unknown = session(phone);
+    await unknown.step('home', 'status');
+    expect(await unknown.step('enter_payment_ref', '99999999')).toEqual({ action: 'navigate', pageId: 'try_again', pageData: { message: 'Payment 99999999 not found.' } });
+    expect(await unknown.step('try_again', 'retry')).toEqual({ action: 'navigate', pageId: 'enter_payment_ref', pageData: {} });
+  });
+
+  it('knows the paying number when the portal phone dials (subscriberId = uuidv5 of it); metadata wins on completion', async () => {
+    const { s } = await toPayer('pay', 'applicant', 'APP-2026-0001', ussdSubscriberIdFor('+23276100001'));
+    const fees = (await s.step('confirm_payer', 'continue')) as Nav;
+    await s.step('select_fee', fees.pageData.fees![0]!.value);
+    const pay = (await s.step('confirm_payment', 'confirm')) as Nav;
+    const id = pay.pageData.payment_id as string;
+    expect(await prisma.payment.findUnique({ where: { id } })).toMatchObject({ payerPhone: '+23276100001' });
+    // Monime reports it masked: the full number we had fits the mask, so it stays
+    await monimeEvent(http, 'payment.processing_completed', { id: 'pay-ussd-verified', type: 'payment' }, {
+      id: 'pay-ussd-verified', status: 'completed', amount: { currency: 'SLE', value: 15000 }, reference: id,
+      channel: { type: 'momo', phoneNumber: '+23276****01' }, metadata: { payment_id: id },
+      fees: [{ code: 'processing', amount: { currency: 'SLE', value: 150 } }],
+    }).expect(200);
+    expect(await prisma.payment.findUnique({ where: { id } })).toMatchObject({ status: 'COMPLETED', payerPhone: '+23276100001' });
   });
 
   it('cancel at confirmation shows the cancelled page and creates nothing', async () => {

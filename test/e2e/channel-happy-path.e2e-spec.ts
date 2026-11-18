@@ -58,6 +58,7 @@ describe('channel API happy path: lookup → initiate → webhook → receipt + 
     const body = { obligationId, amount: '50000', payerPhone: '+23299100004', channel: 'USSD', idempotencyKey: 'e2e-app-0004-1' };
     const res = await channel('post', '/v1/channel/payments', body).expect(201);
     expect(res.body.status).toBe('PENDING');
+    expect(res.body.paymentRef).toMatch(/^[1-9]\d{7}$/);
     expect(res.body.ussdCode).toMatch(/^\*715\*1\*\d+#$/);
     const mins = (new Date(res.body.expiresAt).getTime() - Date.now()) / 60_000;
     expect(mins).toBeGreaterThan(14);
@@ -86,7 +87,9 @@ describe('channel API happy path: lookup → initiate → webhook → receipt + 
     expect(again.body.ack.result).toBe('DUPLICATE');
 
     const pay = await channel('get', `/v1/channel/payments/${paymentId}`).expect(200);
-    expect(pay.body).toMatchObject({ status: 'COMPLETED', amount: { value: '50000' } });
+    expect(pay.body).toMatchObject({ status: 'COMPLETED', amount: { value: '50000' }, monimeOrderNumber: `MO${pay.body.paymentRef}` });
+    // Monime reports the payer masked; the authorised code's metadata carries the full number
+    expect(await prisma.payment.findUnique({ where: { id: paymentId } })).toMatchObject({ payerPhone: '+23299100004' });
 
     const ob = await channel('get', `/v1/channel/payers/applicant/${ref}/obligations`).expect(200);
     expect(ob.body.obligations[0]).toMatchObject({ status: 'PAID', paid: { value: '50000' }, balance: { value: '0' }, holds: { value: '0' } });
@@ -106,12 +109,24 @@ describe('channel API happy path: lookup → initiate → webhook → receipt + 
     await http.get('/r/ZZZZZZZZZZ').expect(404);
   });
 
-  it('writes and delivers the outbox messages', async () => {
+  it('payment status by our ref or Monime order number', async () => {
+    const { paymentRef } = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    const receipt = await prisma.receipt.findUniqueOrThrow({ where: { paymentId } });
+    const expected = {
+      paymentRef, monimeOrderNumber: `MO${paymentRef}`, status: 'COMPLETED', amount: { value: '50000', display: 'SLE 500.00' },
+      feeName: 'Application fee 2026-SEP', payer: { kind: 'applicant', ref, maskedName: 'K*** M***' }, receiptNumber: receipt.number,
+    };
+    expect((await channel('get', `/v1/channel/payments/status/${paymentRef}`).expect(200)).body).toMatchObject(expected);
+    expect((await channel('get', `/v1/channel/payments/status/mo${paymentRef}`).expect(200)).body).toMatchObject(expected);
+    await channel('get', '/v1/channel/payments/status/12345678').expect(404);
+    await channel('get', '/v1/channel/payments/status/not-a-ref!').expect(404);
+  });
+
+  it('writes and delivers the outbox messages (no SMS: Monime texts the payer)', async () => {
     const rows = await prisma.outboxMessage.findMany({ where: { dedupeKey: { endsWith: paymentId } }, orderBy: { type: 'asc' } });
     expect(rows.map((r) => [r.type, r.status])).toEqual([
       ['monime.commission_transfer', 'SENT'],
       ['portal.application_paid', 'SENT'],
-      ['sms.receipt', 'SENT'],
     ]);
     expect(rows[0]!.payload).toEqual({ paymentId, fromAccount: 'fac-mock-unimak-fee-app', amount: '750' });
     // commission → internal transfer from the APP account to the platform account
@@ -125,8 +140,6 @@ describe('channel API happy path: lookup → initiate → webhook → receipt + 
     const log = JSON.parse(readFileSync(path.join(process.env.PORTAL_FIXTURES_DIR!, 'notifications.log.json'), 'utf8')) as { payload: Record<string, string> }[];
     expect(log.at(-1)!.payload).toMatchObject({ event: 'application_paid', applicationRef: ref, amount: '50000' });
 
-    const sms = (rows[2]!.payload as { text: string }).text;
-    expect(sms).toMatch(/SLE 500\.00 received .* Balance SLE 0\.00\. Verify: http:\/\/receipts\.test\/r\//);
   });
 
   it('refuses a second application-fee payment', async () => {
@@ -134,12 +147,6 @@ describe('channel API happy path: lookup → initiate → webhook → receipt + 
       obligationId, amount: '50000', payerPhone: '+23299100004', channel: 'USSD', idempotencyKey: 'e2e-app-0004-2',
     }).expect(409);
     expect(res.body.error.code).toBe('OBLIGATION_SETTLED');
-  });
-
-  it('resends a receipt SMS', async () => {
-    const r = await prisma.receipt.findUniqueOrThrow({ where: { paymentId } });
-    await channel('post', `/v1/channel/receipts/${r.number}/resend`).expect(202);
-    expect(await prisma.outboxMessage.count({ where: { dedupeKey: { startsWith: `sms.receipt:${r.number}:resend:` }, status: 'SENT' } })).toBe(1);
   });
 });
 
