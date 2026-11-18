@@ -1,0 +1,10 @@
+# Never upload local secrets or build artefacts from this machine
+.env
+.env.*
+!.env.example
+*.pem
+node_modules
+dist
+coverage
+.vercel
+fixtures/portal/notifications.log.json

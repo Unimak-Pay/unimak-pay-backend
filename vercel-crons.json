@@ -1,0 +1,17 @@
+{
+  "$comment": "Read by scripts/vercel-build.mjs into .vercel/output/config.json. Vercel Hobby allows daily crons only: build with VERCEL_CRONS=daily.",
+  "crons": [
+    {
+      "path": "/cron/outbox",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/cron/expire-payments",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/cron/reconcile",
+      "schedule": "0 1 * * *"
+    }
+  ]
+}

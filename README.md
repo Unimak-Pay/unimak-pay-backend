@@ -5,7 +5,7 @@ payments and receipts. Payments are collected through **Monime** (USSD and the D
 "Dots" mini-app, which call our **channel API**). Applicants and students come from
 the university portal (mocked with JSON fixtures for now).
 
-NestJS 12 · TypeScript (strict) · Prisma 6 · Postgres (Supabase) · one Vercel function · pnpm
+NestJS 11 · TypeScript (strict) · Prisma 6 · Postgres (Supabase) · one Vercel function · pnpm
 
 ---
 
@@ -397,9 +397,25 @@ Each module: `domain/` (pure), `application/` (use cases, ports), `infrastructur
 
 ## Deploy (Vercel)
 
-One function, `api/index.js`, loads the `tsc` output in `dist/` and caches the Nest app
-across invocations. `vercel.json` rewrites every path to it and schedules both cron
-routes every 5 minutes (sub-daily crons need a Pro plan).
+Project: `mohamed-ramseys-projects/unimak-pay-backend`. Pushes to `main` deploy to
+production and other branches/PRs get previews once the GitHub repo is connected.
+
+The build uses the **Build Output API**: `vercel.json` runs `node scripts/vercel-build.mjs`,
+which compiles with `tsc` (Nest needs `emitDecoratorMetadata`), then assembles one
+function in `.vercel/output/functions/index.func` — `dist/`, `fixtures/`, a flat
+production-only `node_modules` (pnpm install with the hoisted linker, then everything
+not reachable from our runtime dependencies is pruned, e.g. the Prisma CLI) and the
+generated Prisma client with its `rhel-openssl-3.0.x` engine. Runtime: Node 24.
+All paths route to that function; the Nest app is cached across invocations.
+
+Crons come from `vercel-crons.json` (outbox and expiry every 5 min, reconciliation
+01:00 UTC). The Hobby plan only allows daily crons: build with `VERCEL_CRONS=daily`
+there (only reconciliation is kept) — then run the outbox and expiry sweeps from
+elsewhere (e.g. Supabase `pg_cron` + `pg_net` calling the same routes with
+`Authorization: Bearer $CRON_SECRET`), or move to Pro.
+
+Check a build locally: `VERCEL_CRONS=daily node scripts/vercel-build.mjs` (keeps the
+local Prisma engine; on Vercel only the Linux one is kept).
 
 Set on Vercel: `DATABASE_URL` (Supabase transaction pooler,
 `?pgbouncer=true&connection_limit=1`), `DIRECT_URL` (direct, for migrations),
@@ -409,6 +425,3 @@ Set on Vercel: `DATABASE_URL` (Supabase transaction pooler,
 Run `pnpm db:deploy` with `DIRECT_URL` before deploying a new migration, then
 `pnpm monime:provision` and `pnpm monime:register-webhook https://<domain>/webhooks/monime`
 once per environment.
-
-Not yet verified on a real deployment: Prisma engine bundling under pnpm
-(`includeFiles` in `vercel.json`) and that rewrites preserve the original path for cron routes.
