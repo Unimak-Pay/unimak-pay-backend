@@ -35,6 +35,30 @@ export interface PaymentCodeView {
   amount: bigint;
 }
 
+// ── Payments (what Monime collected) ────────────────────────────────────────
+
+/** A Monime Payment object (GET /v1/payments). */
+export interface MonimePaymentRecord {
+  id: string;
+  status: 'pending' | 'processing' | 'completed';
+  currency: string;
+  amount: bigint;
+  financialAccountId: string | null;
+  reference: string | null;
+  /** payment metadata merged over its owner's */
+  metadata: Record<string, string>;
+  ownerId: string | null;
+  fees: bigint;
+  payerPhone: string | null;
+  createTime: Date;
+  updateTime: Date | null;
+}
+
+export interface MonimePage<T> {
+  items: T[];
+  next: string | null;
+}
+
 // ── Financial accounts ───────────────────────────────────────────────────────
 
 export interface CreateFinancialAccountInput {
@@ -138,6 +162,10 @@ export class MonimeError extends Error {
 export interface MonimeClient {
   createPaymentCode(input: CreatePaymentCodeInput): Promise<PaymentCodeView>;
   getPaymentCode(id: string): Promise<PaymentCodeView>;
+
+  /** Payments received into an account. TODO(monime): ordering isn't documented. */
+  listPayments(q: { financialAccountId: string; after?: string | null; limit?: number }): Promise<MonimePage<MonimePaymentRecord>>;
+  getPayment(id: string): Promise<MonimePaymentRecord>;
 
   createFinancialAccount(input: CreateFinancialAccountInput): Promise<FinancialAccountView>;
   getFinancialAccount(id: string, opts?: { withBalance?: boolean }): Promise<FinancialAccountView>;

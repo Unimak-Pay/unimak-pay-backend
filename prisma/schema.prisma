@@ -488,6 +488,68 @@ model AuditLog {
   @@index([actorId, at])
 }
 
+// ───────────────────────────── Reconciliation ─────────────────────────────
+
+enum ReconciliationRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// One nightly (or manual) comparison of a time window against Monime.
+model ReconciliationRun {
+  id          String                  @id @default(uuid()) @db.Uuid
+  windowStart DateTime
+  windowEnd   DateTime
+  status      ReconciliationRunStatus @default(RUNNING)
+  /// "cron" or an AdminUser id
+  triggeredBy String
+  startedAt   DateTime                @default(now())
+  finishedAt  DateTime?
+  stats       Json?
+  error       String?
+
+  items ReconciliationItem[]
+
+  @@index([windowStart, status])
+}
+
+enum ReconciliationItemStatus {
+  /// needs a human
+  OPEN
+  /// fixed by the run itself (e.g. a missed webhook settled)
+  AUTO_RESOLVED
+  /// closed by an admin
+  RESOLVED
+}
+
+model ReconciliationItem {
+  id              String                   @id @default(uuid()) @db.Uuid
+  runId           String                   @db.Uuid
+  /// MISSED_WEBHOOK_SETTLED | UNMATCHED_MONIME_PAYMENT | MISSING_AT_MONIME |
+  /// AMOUNT_MISMATCH | MONIME_FEE_MISMATCH | COMMISSION_MISSING |
+  /// COMMISSION_NOT_COMPLETED | COMMISSION_AMOUNT_MISMATCH | SCAN_TRUNCATED
+  kind            String
+  status          ReconciliationItemStatus @default(OPEN)
+  paymentId       String?                  @db.Uuid
+  monimePaymentId String?
+  transferId      String?                  @db.Uuid
+  financialAccountId String?
+  expected        Json?
+  actual          Json?
+  note            String
+  resolvedAt      DateTime?
+  resolvedBy      String?
+  resolution      String?
+  createdAt       DateTime                 @default(now())
+
+  run ReconciliationRun @relation(fields: [runId], references: [id])
+
+  @@index([status, kind])
+  @@index([paymentId])
+  @@index([monimePaymentId])
+}
+
 // ───────────────────────────── USSD sessions ─────────────────────────────
 
 /// Server-side state of a Monime USSD flow session. The flow's own flowData is

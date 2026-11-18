@@ -8,7 +8,7 @@ import { AdminOpsService } from '../application/admin-ops.service';
 import { AdminUsersService } from '../application/admin-users.service';
 import { BigIntJsonInterceptor } from './bigint-json.interceptor';
 import {
-  AuditQuery, CreateAdminUserDto, CreatePayoutDto, PaymentsQuery, ResolveEventDto, StatusQuery, UpdateAdminUserDto,
+  AuditQuery, CreateAdminUserDto, CreatePayoutDto, PaymentsQuery, RunReconciliationDto, ResolveEventDto, StatusQuery, UpdateAdminUserDto,
 } from './dto';
 
 /**
@@ -147,6 +147,33 @@ export class AdminController {
   @RequirePermissions('reconciliation.read')
   reconciliation() {
     return this.ops.reconciliationSummary();
+  }
+
+  @Get('reconciliation/runs')
+  @RequirePermissions('reconciliation.read')
+  runs(@Query() q: StatusQuery) {
+    return this.ops.listRuns(q);
+  }
+
+  @Get('reconciliation/runs/:id')
+  @RequirePermissions('reconciliation.read')
+  run(@Param('id', ParseUUIDPipe) id: string) {
+    return this.ops.getRun(id);
+  }
+
+  /** Runs the Monime comparison now for a UTC day (default yesterday). */
+  @Post('reconciliation/runs')
+  @HttpCode(201)
+  @RequirePermissions('reconciliation.manage')
+  startRun(@CurrentAdmin() admin: AdminPrincipal, @Body() dto: RunReconciliationDto) {
+    return this.ops.runReconciliation(admin, dto.date);
+  }
+
+  @Post('reconciliation/items/:id/resolve')
+  @HttpCode(200)
+  @RequirePermissions('reconciliation.manage')
+  resolveItem(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ResolveEventDto) {
+    return this.ops.resolveItem(admin, id, dto.resolution);
   }
 
   @Get('reconciliation/webhook-events/:id')

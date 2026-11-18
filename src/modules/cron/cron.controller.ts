@@ -2,6 +2,7 @@ import { Controller, Get, UseGuards } from '@nestjs/common';
 import { OutboxDispatcher } from '../outbox/application/outbox-dispatcher';
 import { ExpirePaymentsUseCase } from '../payments/application/expire-payments.use-case';
 import { PrismaService } from '../../shared/infrastructure/prisma.service';
+import { NightlyReconciliationService } from '../reconciliation/application/nightly-reconciliation.service';
 import { CronGuard } from './cron.guard';
 
 @Controller('cron')
@@ -11,6 +12,7 @@ export class CronController {
     private readonly dispatcher: OutboxDispatcher,
     private readonly expire: ExpirePaymentsUseCase,
     private readonly prisma: PrismaService,
+    private readonly reconciliation: NightlyReconciliationService,
   ) {}
 
   @Get('outbox')
@@ -23,6 +25,12 @@ export class CronController {
       if (s.claimed < 50) break;
     }
     return total;
+  }
+
+  /** Nightly: compare yesterday (UTC) with Monime. */
+  @Get('reconcile')
+  reconcile() {
+    return this.reconciliation.runNightly();
   }
 
   @Get('expire-payments')

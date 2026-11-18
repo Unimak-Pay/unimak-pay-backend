@@ -11,12 +11,14 @@ import {
   type FinancialAccountView,
   type InternalTransferView,
   type MonimeClient,
+  type MonimePage,
+  type MonimePaymentRecord,
   MonimeError,
   type PaymentCodeView,
   type PayoutView,
 } from './monime.port';
 
-type Kind = 'PAYMENT_CODE' | 'ACCOUNT' | 'TRANSFER' | 'PAYOUT' | 'WEBHOOK';
+type Kind = 'PAYMENT_CODE' | 'PAYMENT' | 'ACCOUNT' | 'TRANSFER' | 'PAYOUT' | 'WEBHOOK';
 
 /** Same ids as the real ones from GET /v1/banks?country=SL (enum in the spec). */
 const MOCK_BANKS: BankView[] = [
@@ -53,6 +55,38 @@ export class MockMonimeClient implements MonimeClient {
 
   async getPaymentCode(id: string): Promise<PaymentCodeView> {
     return this.toPaymentCode(await this.find(id, 'PAYMENT_CODE'));
+  }
+
+  // ── Payments ───────────────────────────────────────────────────────────────
+
+  /** Newest first, like a typical Monime listing; cursor = offset. */
+  async listPayments(q: { financialAccountId: string; after?: string | null; limit?: number }): Promise<MonimePage<MonimePaymentRecord>> {
+    const limit = q.limit ?? 50;
+    const offset = q.after ? Number(q.after) : 0;
+    const rows = await this.prisma.mockMonimeRecord.findMany({
+      where: { kind: 'PAYMENT', data: { path: ['financialAccountId'], equals: q.financialAccountId } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: offset,
+      take: limit + 1,
+    });
+    return { items: rows.slice(0, limit).map((r) => this.toPaymentRecord(r)), next: rows.length > limit ? String(offset + limit) : null };
+  }
+
+  async getPayment(id: string): Promise<MonimePaymentRecord> {
+    return this.toPaymentRecord(await this.find(id, 'PAYMENT'));
+  }
+
+  /** Dev helper: what Monime records when a collection completes. */
+  async recordPayment(p: { id: string; amount: bigint; financialAccountId: string | null; reference: string | null; metadata: Record<string, string>; ownerId: string | null; fees: bigint; payerPhone: string | null; createTime?: Date }): Promise<void> {
+    const at = p.createTime ?? new Date();
+    await this.prisma.mockMonimeRecord.upsert({
+      where: { id: p.id },
+      create: {
+        id: p.id, kind: 'PAYMENT', status: 'completed', amount: p.amount, createdAt: at,
+        data: { financialAccountId: p.financialAccountId, reference: p.reference, metadata: p.metadata, ownerId: p.ownerId, fees: p.fees.toString(), payerPhone: p.payerPhone, createTime: at.toISOString() },
+      },
+      update: {},
+    });
   }
 
   // ── Financial accounts ─────────────────────────────────────────────────────
@@ -142,11 +176,11 @@ export class MockMonimeClient implements MonimeClient {
 
   /** completed collections in, transfers in/out, payouts out (pending ones count as spent). */
   async balanceOf(accountId: string): Promise<bigint> {
-    const rows = await this.prisma.mockMonimeRecord.findMany({ where: { kind: { in: ['PAYMENT_CODE', 'TRANSFER', 'PAYOUT'] } } });
+    const rows = await this.prisma.mockMonimeRecord.findMany({ where: { kind: { in: ['PAYMENT', 'TRANSFER', 'PAYOUT'] } } });
     let balance = 0n;
     for (const r of rows) {
       const d = r.data as Record<string, unknown>;
-      if (r.kind === 'PAYMENT_CODE' && r.status === 'completed' && d['financialAccountId'] === accountId) balance += r.amount;
+      if (r.kind === 'PAYMENT' && d['financialAccountId'] === accountId) balance += r.amount;
       if (r.kind === 'TRANSFER' && r.status !== 'failed') {
         if (d['sourceFinancialAccountId'] === accountId) balance -= r.amount;
         if (r.status === 'completed' && d['destinationFinancialAccountId'] === accountId) balance += r.amount;
@@ -170,6 +204,24 @@ export class MockMonimeClient implements MonimeClient {
     const row = await this.prisma.mockMonimeRecord.findUnique({ where: { id } });
     if (!row || row.kind !== kind) throw new MonimeError('NOT_FOUND', `${kind} ${id} not found`, 404);
     return row;
+  }
+
+  private toPaymentRecord(r: { id: string; status: string; amount: bigint; data: unknown; createdAt: Date }): MonimePaymentRecord {
+    const d = r.data as Record<string, unknown>;
+    return {
+      id: r.id,
+      status: r.status as MonimePaymentRecord['status'],
+      currency: 'SLE',
+      amount: r.amount,
+      financialAccountId: (d['financialAccountId'] as string | null) ?? null,
+      reference: (d['reference'] as string | null) ?? null,
+      metadata: (d['metadata'] as Record<string, string>) ?? {},
+      ownerId: (d['ownerId'] as string | null) ?? null,
+      fees: BigInt((d['fees'] as string | undefined) ?? '0'),
+      payerPhone: (d['payerPhone'] as string | null) ?? null,
+      createTime: new Date((d['createTime'] as string | undefined) ?? r.createdAt),
+      updateTime: null,
+    };
   }
 
   private toPaymentCode(r: { id: string; status: string; amount: bigint; data: unknown }): PaymentCodeView {

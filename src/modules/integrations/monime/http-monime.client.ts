@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { toInternationalMsisdn } from '../../../shared/domain/phone';
 import {
   type BankView,
   type CreateFinancialAccountInput,
@@ -10,6 +11,8 @@ import {
   type FinancialAccountView,
   type InternalTransferView,
   type MonimeClient,
+  type MonimePage,
+  type MonimePaymentRecord,
   MonimeError,
   type PaymentCodeView,
   type PayoutView,
@@ -68,6 +71,19 @@ interface WirePayout {
   fees?: WireFee[] | null;
   failureDetail?: { code: string; message?: string | null } | null;
 }
+interface WirePayment {
+  id: string;
+  status: MonimePaymentRecord['status'];
+  amount: WireAmount;
+  financialAccountId?: string | null;
+  reference?: string | null;
+  metadata?: Record<string, unknown> | null;
+  fees?: WireFee[] | null;
+  channel?: { type?: string; phoneNumber?: string } | null;
+  ownershipGraph?: { owner?: { id?: string; metadata?: Record<string, unknown> | null } | null } | null;
+  createTime: string;
+  updateTime?: string | null;
+}
 interface WireBank {
   providerId: string;
   name: string;
@@ -108,6 +124,19 @@ export class HttpMonimeClient implements MonimeClient {
 
   async getPaymentCode(id: string): Promise<PaymentCodeView> {
     return toPaymentCode(await this.get<WirePaymentCode>(`/payment-codes/${enc(id)}`));
+  }
+
+  // ── Payments ───────────────────────────────────────────────────────────────
+
+  async listPayments(q: { financialAccountId: string; after?: string | null; limit?: number }): Promise<MonimePage<MonimePaymentRecord>> {
+    const qs = new URLSearchParams({ financialAccountId: q.financialAccountId, limit: String(q.limit ?? 50) });
+    if (q.after) qs.set('after', q.after);
+    const page = await this.request<WirePayment[]>('GET', `/payments?${qs.toString()}`);
+    return { items: (page.result ?? []).map(toPaymentRecord), next: page.next };
+  }
+
+  async getPayment(id: string): Promise<MonimePaymentRecord> {
+    return toPaymentRecord(await this.get<WirePayment>(`/payments/${enc(id)}`));
   }
 
   // ── Financial accounts ─────────────────────────────────────────────────────
@@ -192,18 +221,18 @@ export class HttpMonimeClient implements MonimeClient {
 
   // ── Transport ──────────────────────────────────────────────────────────────
 
-  private get<T>(path: string): Promise<T> {
-    return this.request<T>('GET', path);
+  private async get<T>(path: string): Promise<T> {
+    return (await this.request<T>('GET', path)).result;
   }
 
   private post<T>(path: string, idempotencyKey: string, body: unknown): Promise<T> {
     if (!idempotencyKey || idempotencyKey.length > IDEMPOTENCY_KEY_MAX) {
       throw new MonimeError('REJECTED', `Idempotency-Key required, ≤ ${IDEMPOTENCY_KEY_MAX} chars`);
     }
-    return this.request<T>('POST', path, body, idempotencyKey);
+    return this.request<T>('POST', path, body, idempotencyKey).then((r) => r.result);
   }
 
-  private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown, idempotencyKey?: string): Promise<T> {
+  private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown, idempotencyKey?: string): Promise<{ result: T; next: string | null }> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.cfg.accessToken}`,
       'Monime-Space-Id': this.cfg.spaceId,
@@ -228,7 +257,7 @@ export class HttpMonimeClient implements MonimeClient {
     }
   }
 
-  private async send<T>(method: string, url: string, headers: Record<string, string>, body?: string): Promise<T> {
+  private async send<T>(method: string, url: string, headers: Record<string, string>, body?: string): Promise<{ result: T; next: string | null }> {
     let res: Response;
     try {
       res = await this.fetchFn(url, { method, headers, body, signal: AbortSignal.timeout(this.cfg.timeoutMs ?? 15_000) });
@@ -236,13 +265,13 @@ export class HttpMonimeClient implements MonimeClient {
       throw new MonimeError('UNAVAILABLE', `Monime request failed: ${(err as Error).message}`);
     }
     const text = await res.text();
-    let json: { success?: boolean; result?: T; error?: { message?: string; code?: string } } | null = null;
+    let json: { success?: boolean; result?: T; pagination?: { next?: string | null }; error?: { message?: string; code?: string } } | null = null;
     try {
       json = text ? JSON.parse(text) : null;
     } catch {
       json = null;
     }
-    if (res.ok && json?.success && json.result !== undefined) return json.result;
+    if (res.ok && json?.success && json.result !== undefined) return { result: json.result, next: json.pagination?.next ?? null };
 
     const message = json?.error?.message ?? `Monime responded with HTTP ${res.status}`;
     if (res.status === 404) throw new MonimeError('NOT_FOUND', message, 404);
@@ -306,6 +335,28 @@ function toTransfer(t: WireInternalTransfer): InternalTransferView {
     status: t.status,
     amount: fromWire(t.amount),
     failure: t.failureDetail ? { code: t.failureDetail.code, message: t.failureDetail.message ?? null } : null,
+  };
+}
+
+function stringRecord(v: Record<string, unknown> | null | undefined): Record<string, string> {
+  return Object.fromEntries(Object.entries(v ?? {}).filter(([, x]) => typeof x === 'string' || typeof x === 'number').map(([k, x]) => [k, String(x)]));
+}
+
+function toPaymentRecord(p: WirePayment): MonimePaymentRecord {
+  const owner = p.ownershipGraph?.owner ?? null;
+  return {
+    id: p.id,
+    status: p.status,
+    currency: p.amount.currency,
+    amount: BigInt(p.amount.value),
+    financialAccountId: p.financialAccountId ?? null,
+    reference: p.reference ?? null,
+    metadata: { ...stringRecord(owner?.metadata), ...stringRecord(p.metadata) },
+    ownerId: owner?.id ?? null,
+    fees: (p.fees ?? []).filter((f) => f.amount?.currency === p.amount.currency).reduce((s, f) => s + BigInt(f.amount.value), 0n),
+    payerPhone: toInternationalMsisdn(p.channel?.phoneNumber ?? ''),
+    createTime: new Date(p.createTime),
+    updateTime: p.updateTime ? new Date(p.updateTime) : null,
   };
 }
 

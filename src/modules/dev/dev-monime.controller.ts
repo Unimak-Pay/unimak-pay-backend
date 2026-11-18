@@ -54,6 +54,11 @@ export class DevMonimeController {
 
     if (mock && p.monimeRef) await mock.setStatus(p.monimeRef, 'completed');
     const monimePaymentId = `pay-mock-${p.id.slice(0, 8)}`;
+    await mock?.recordPayment({
+      id: monimePaymentId, amount: BigInt(dto.amount ?? p.amount), financialAccountId: o.settlementAccount, reference: p.id,
+      metadata: { paymentId: p.id }, ownerId: p.monimeRef, fees: p.monimeFee, payerPhone: p.payerPhone,
+    });
+    if (dto.deliver === false) return { simulated: 'completed', delivered: false, monimePaymentId, note: 'Recorded at Monime only (missed webhook)' };
     return this.deliver(dto, MONIME_EVENTS.paymentCompleted, { id: monimePaymentId, type: 'payment' }, {
       id: monimePaymentId,
       status: 'completed',

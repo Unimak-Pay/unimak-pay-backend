@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, IsUUID, Length, Matches } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, Length, Matches } from 'class-validator';
 
 /** Exactly one of paymentId / transferId / payoutId (our ids). */
 export class SimulateWebhookDto {
@@ -27,6 +27,11 @@ export class SimulateWebhookDto {
   @IsOptional()
   @Matches(/^[1-9]\d{0,17}$/)
   amount?: string;
+
+  /** false: Monime records the payment but the webhook never arrives (test reconciliation). */
+  @IsOptional()
+  @IsBoolean()
+  deliver?: boolean;
 
   /** Reuse an event id to test redelivery dedupe. */
   @IsOptional()

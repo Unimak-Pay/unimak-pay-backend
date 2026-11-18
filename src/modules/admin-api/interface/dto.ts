@@ -104,6 +104,12 @@ export class CreatePayoutDto {
   idempotencyKey!: string;
 }
 
+export class RunReconciliationDto {
+  /** UTC day to reconcile, YYYY-MM-DD (default: yesterday) */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  date?: string;
+}
+
 export class ResolveEventDto {
   @IsString() @Length(3, 500)
   resolution!: string;
