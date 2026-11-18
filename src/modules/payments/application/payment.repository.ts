@@ -13,6 +13,7 @@ export interface PaymentRecord {
   clientId: string;
   idempotencyKey: string;
   payerPhone: string;
+  phoneAuthorized: boolean;
   status: PaymentStatus;
   monimeRef: string | null;
   ussdCode: string | null;
@@ -34,6 +35,7 @@ export interface NewPayment {
   clientId: string;
   idempotencyKey: string;
   payerPhone: string;
+  phoneAuthorized: boolean;
   pricingConfigId: string;
   monimeFee: Minor;
   platformFee: Minor;
@@ -57,6 +59,8 @@ export interface LockedObligation {
   payerId: string;
   payerKind: 'APPLICANT' | 'STUDENT';
   payerRef: string;
+  /** phone on the portal record */
+  payerPortalPhone: string;
   programCode: string;
 }
 

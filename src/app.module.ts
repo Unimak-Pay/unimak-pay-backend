@@ -9,6 +9,7 @@ import { ChannelApiModule } from './modules/channel-api/channel-api.module';
 import { CronModule } from './modules/cron/cron.module';
 import { DevModule } from './modules/dev/dev.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { UssdModule } from './modules/ussd/ussd.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { PrismaModule } from './shared/infrastructure/prisma.module';
 import { DomainErrorFilter } from './shared/interface/domain-error.filter';
@@ -27,6 +28,7 @@ function devModules(): (Type | DynamicModule)[] {
     CatalogModule,
     ChannelApiModule,
     WebhooksModule,
+    UssdModule,
     CronModule,
     AdminApiModule,
     ...devModules(),

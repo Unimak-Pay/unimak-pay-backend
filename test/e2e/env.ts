@@ -16,7 +16,19 @@ writeFileSync(path.join(fixtures, 'notifications.log.json'), '[]');
 const jwt = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const jwk = { ...jwt.publicKey.export({ format: 'jwk' }), kid: 'e2e-key', alg: 'ES256', use: 'sig' };
 
+// Our USSD flow key pairs (current + previous, for rotation) and the secret path token.
+const ussdKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const ussdPrev = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const pem = (k: import('node:crypto').KeyObject, type: 'pkcs8' | 'spki') => k.export({ format: 'pem', type }).toString();
+
 Object.assign(process.env, {
+  USSD_RSA_PRIVATE_KEY: pem(ussdKey.privateKey, 'pkcs8').replace(/\n/g, '\\n'), // as stored in an env var
+  USSD_RSA_PRIVATE_KEY_PREVIOUS: pem(ussdPrev.privateKey, 'pkcs8'),
+  E2E_USSD_PUBLIC_KEY: pem(ussdKey.publicKey, 'spki'),
+  E2E_USSD_PREVIOUS_PUBLIC_KEY: pem(ussdPrev.publicKey, 'spki'),
+  USSD_EXCHANGE_PATH_TOKEN: 'e2e-ussd-path-token-0123456789abcdef',
+  USSD_ALLOW_PLAINTEXT: 'false',
+  USSD_MAX_LOOKUPS_PER_15_MIN: '10',
   AUTH_JWKS_JSON: JSON.stringify({ keys: [jwk] }),
   AUTH_JWT_ISSUER: 'https://e2e.supabase.test/auth/v1',
   E2E_JWT_PRIVATE_KEY: jwt.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),

@@ -27,7 +27,8 @@
     "monime:banks": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/banks.js",
     "monime:register-webhook": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/register-webhook.js",
     "monime:payout": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/payout.js",
-    "admin:create": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/admin-create.js"
+    "admin:create": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/admin-create.js",
+    "ussd:flow": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/ussd-flow.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

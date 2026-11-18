@@ -1,6 +1,7 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { OutboxDispatcher } from '../outbox/application/outbox-dispatcher';
 import { ExpirePaymentsUseCase } from '../payments/application/expire-payments.use-case';
+import { PrismaService } from '../../shared/infrastructure/prisma.service';
 import { CronGuard } from './cron.guard';
 
 @Controller('cron')
@@ -9,6 +10,7 @@ export class CronController {
   constructor(
     private readonly dispatcher: OutboxDispatcher,
     private readonly expire: ExpirePaymentsUseCase,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Get('outbox')
@@ -25,6 +27,8 @@ export class CronController {
 
   @Get('expire-payments')
   async expirePayments() {
-    return { expired: await this.expire.execute() };
+    const expired = await this.expire.execute();
+    const { count: ussdSessions } = await this.prisma.ussdSession.deleteMany({ where: { updatedAt: { lt: new Date(Date.now() - 24 * 60 * 60_000) } } });
+    return { expired, ussdSessionsDeleted: ussdSessions };
   }
 }

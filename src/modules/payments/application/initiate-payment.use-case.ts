@@ -16,6 +16,8 @@ export interface InitiatePaymentInput {
   payerPhone: string;
   channel: Channel;
   idempotencyKey: string;
+  /** restrict the payment code to payerPhone (default true) */
+  phoneAuthorized?: boolean;
 }
 
 /**
@@ -62,6 +64,7 @@ export class InitiatePaymentUseCase {
             clientId: input.clientId,
             idempotencyKey: input.idempotencyKey,
             payerPhone: input.payerPhone,
+            phoneAuthorized: input.phoneAuthorized ?? true,
             pricingConfigId: ev.pricingConfigId,
             monimeFee: ev.split.monimeFee,
             platformFee: ev.split.platformFee,
@@ -100,7 +103,7 @@ export class InitiatePaymentUseCase {
         amount: p.amount,
         durationMinutes: minutesLeft,
         reference: p.id,
-        authorizedPhoneNumber: p.payerPhone,
+        authorizedPhoneNumber: p.phoneAuthorized ? p.payerPhone : undefined,
         financialAccountId: o.settlementAccount!,
         metadata: { paymentId: p.id, obligationId: o.id, payerRef: o.payerRef, feeTypeCode: o.feeTypeCode, channel: p.channel },
       });

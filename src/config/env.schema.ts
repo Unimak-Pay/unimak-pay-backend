@@ -124,6 +124,41 @@ export class EnvSchema {
   @IsBoolean()
   ADMIN_REQUIRE_MFA = true;
 
+  // ---- Monime USSD flow exchange (RSA-OAEP + AES-128-GCM) ----
+  /** PKCS#8 PEM (-----BEGIN PRIVATE KEY-----), RSA 2048; literal \n allowed. */
+  @IsString()
+  @IsOptional()
+  USSD_RSA_PRIVATE_KEY?: string;
+
+  /** Previous key, kept ≥ 30 min after rotating (live sessions). */
+  @IsString()
+  @IsOptional()
+  USSD_RSA_PRIVATE_KEY_PREVIOUS?: string;
+
+  /** Secret path segment: POST /v1/ussd/exchange/<token>. Monime requests aren't signed, keep it private. */
+  @IsString()
+  @MinLength(32)
+  @IsOptional()
+  USSD_EXCHANGE_PATH_TOKEN?: string;
+
+  /** Optional comma-separated source IP allowlist for the exchange endpoint. */
+  @IsString()
+  @IsOptional()
+  USSD_ALLOWED_IPS?: string;
+
+  /** Dev only: accept unencrypted JSON (refused when NODE_ENV=production). */
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  USSD_ALLOW_PLAINTEXT = false;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  USSD_MAX_LOOKUPS_PER_15_MIN = 10;
+
+  @IsString()
+  USSD_HELP_MESSAGE = 'UNIMAK Finance Office: call +232 00 000 000 (Mon-Fri 9am-4pm).';
+
   // ---- Channel API / cron ----
   /** JSON array: [{"id":"ussd","apiKey":"...","secret":"..."}] */
   @IsString()
@@ -153,6 +188,9 @@ export function validateEnv(raw: Record<string, unknown>): EnvSchema {
       .map((e) => `${e.property}: ${Object.values(e.constraints ?? {}).join(', ')}`)
       .join('\n  ');
     throw new Error(`Invalid environment:\n  ${msg}`);
+  }
+  if (env.NODE_ENV === 'production' && env.USSD_ALLOW_PLAINTEXT) {
+    throw new Error('Invalid environment:\n  USSD_ALLOW_PLAINTEXT must not be enabled in production');
   }
   if (env.PORTAL_MODE === 'http' && !env.PORTAL_BASE_URL) {
     throw new Error('Invalid environment:\n  PORTAL_BASE_URL is required when PORTAL_MODE=http');

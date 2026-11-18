@@ -143,6 +143,11 @@ export class SettlePaymentService {
         },
       },
     ];
+    // Spec: the receipt also goes to the phone on the portal record when someone else paid.
+    if (o.payerPortalPhone && o.payerPortalPhone !== p.payerPhone) {
+      const first = messages[0]!;
+      messages.push({ ...first, dedupeKey: `sms.receipt:${p.id}:portal`, payload: { ...first.payload, phone: o.payerPortalPhone } } as OutboxMessageInput);
+    }
     if (o.feeTypeCode === APPLICATION_FEE_CODE) {
       messages.push({
         type: 'portal.application_paid',

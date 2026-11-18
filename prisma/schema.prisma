@@ -237,6 +237,8 @@ model Payment {
   clientId        String
   idempotencyKey  String
   payerPhone      String
+  /// payment code restricted to payerPhone (false: USSD payer declined to share their number)
+  phoneAuthorized Boolean       @default(true)
   status          PaymentStatus @default(INITIATED)
   /// Monime payment code id (pmc-…) created at initiation
   monimeRef       String?       @unique
