@@ -3,6 +3,7 @@ import { APP_FILTER } from '@nestjs/core';
 import { AppConfigModule } from './config/config.module';
 import { HealthController } from './health.controller';
 import { AdminApiModule } from './modules/admin-api/admin-api.module';
+import { AuditModule } from './modules/audit/audit.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { ChannelApiModule } from './modules/channel-api/channel-api.module';
 import { CronModule } from './modules/cron/cron.module';
@@ -21,6 +22,7 @@ function devModules(): (Type | DynamicModule)[] {
   imports: [
     AppConfigModule,
     PrismaModule,
+    AuditModule,
     IntegrationsModule,
     CatalogModule,
     ChannelApiModule,

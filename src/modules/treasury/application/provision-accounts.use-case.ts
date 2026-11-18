@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
+import { AuditService } from '../../audit/audit.service';
 import { MONIME_CLIENT, type MonimeClient } from '../../integrations/monime/monime.port';
 import { feeTypeAccountName, feeTypeAccountReference, PLATFORM_ACCOUNT_REFERENCE } from '../domain/accounts';
 
@@ -24,10 +25,12 @@ export class ProvisionAccountsUseCase {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
     @Inject(MONIME_CLIENT) private readonly monime: MonimeClient,
   ) {}
 
-  async execute(opts: { platform?: boolean } = {}): Promise<ProvisionedAccount[]> {
+  async execute(opts: { platform?: boolean; actorId?: string } = {}): Promise<ProvisionedAccount[]> {
+    const actorId = opts.actorId ?? 'system';
     const out: ProvisionedAccount[] = [];
     const feeTypes = await this.prisma.feeType.findMany({ include: { account: true }, orderBy: { code: 'asc' } });
     for (const ft of feeTypes) {
@@ -37,7 +40,8 @@ export class ProvisionAccountsUseCase {
       }
       const reference = feeTypeAccountReference(ft.code);
       const { id, uvan, name, created } = await this.ensureRemote(reference, feeTypeAccountName(ft.name), { feeTypeCode: ft.code });
-      await this.prisma.financialAccount.create({ data: { monimeId: id, reference, name, purpose: 'FEE_TYPE', feeTypeId: ft.id, uvan } });
+      const row = await this.prisma.financialAccount.create({ data: { monimeId: id, reference, name, purpose: 'FEE_TYPE', feeTypeId: ft.id, uvan } });
+      await this.audit.record({ actorId, action: created ? 'account.create' : 'account.link', entity: 'FinancialAccount', entityId: row.id, after: row });
       out.push({ reference, monimeId: id, name, purpose: 'FEE_TYPE', feeTypeCode: ft.code, created });
     }
 
@@ -47,7 +51,8 @@ export class ProvisionAccountsUseCase {
         out.push({ reference: existing.reference, monimeId: existing.monimeId, name: existing.name, purpose: 'PLATFORM', feeTypeCode: null, created: false });
       } else {
         const { id, uvan, name, created } = await this.ensureRemote(PLATFORM_ACCOUNT_REFERENCE, 'Platform commission', { purpose: 'platform' });
-        await this.prisma.financialAccount.create({ data: { monimeId: id, reference: PLATFORM_ACCOUNT_REFERENCE, name, purpose: 'PLATFORM', uvan } });
+        const row = await this.prisma.financialAccount.create({ data: { monimeId: id, reference: PLATFORM_ACCOUNT_REFERENCE, name, purpose: 'PLATFORM', uvan } });
+        await this.audit.record({ actorId, action: created ? 'account.create' : 'account.link', entity: 'FinancialAccount', entityId: row.id, after: row });
         out.push({ reference: PLATFORM_ACCOUNT_REFERENCE, monimeId: id, name, purpose: 'PLATFORM', feeTypeCode: null, created });
       }
     }

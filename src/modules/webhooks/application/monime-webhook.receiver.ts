@@ -71,6 +71,17 @@ export class MonimeWebhookReceiver {
     return this.process(env, body);
   }
 
+  /**
+   * Re-runs a stored, previously verified event (reconciliation). Only events
+   * that didn't reach a final outcome (FAILED / RECEIVED) are processed again;
+   * final ones come back as DUPLICATE.
+   */
+  async replayStored(eventId: string): Promise<WebhookAck> {
+    const row = await this.prisma.webhookEvent.findUnique({ where: { id: eventId } });
+    if (!row) throw new InvalidWebhookPayloadError(`Webhook event ${eventId} not found`);
+    return this.process(parseMonimeWebhook(row.payload), row.payload);
+  }
+
   private async process(env: MonimeWebhookEnvelope, payload: unknown): Promise<WebhookAck> {
     const stored: InboxEvent = { id: env.event.id, type: env.event.name, payload };
     let result: SettlementResult | 'DUPLICATE';

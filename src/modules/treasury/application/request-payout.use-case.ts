@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { DomainError } from '../../../shared/domain/errors';
 import type { Minor } from '../../../shared/domain/money';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
+import { AuditService } from '../../audit/audit.service';
 import { MONIME_CLIENT, type MonimeClient, MonimeError } from '../../integrations/monime/monime.port';
 import { assertCanManagePayouts, assertPayoutAffordable, payoutStatusFromMonime } from '../domain/payout-policy';
 
@@ -39,6 +40,7 @@ export class RequestPayoutUseCase {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
     @Inject(MONIME_CLIENT) private readonly monime: MonimeClient,
   ) {}
 
@@ -71,7 +73,7 @@ export class RequestPayoutUseCase {
             _sum: { amount: true },
           });
           assertPayoutAffordable({ amount: input.amount, available, reservedLocally: reserved._sum.amount ?? 0n });
-          return tx.payout.create({
+          const created = await tx.payout.create({
             data: {
               financialAccountId: account.id,
               amount: input.amount,
@@ -84,6 +86,8 @@ export class RequestPayoutUseCase {
               idempotencyKey: input.idempotencyKey,
             },
           });
+          await this.audit.record({ actorId: actor.id, action: 'payout.request', entity: 'Payout', entityId: created.id, after: created }, tx);
+          return created;
         },
         { timeout: 20_000 },
       );

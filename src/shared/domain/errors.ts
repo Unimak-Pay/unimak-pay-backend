@@ -16,7 +16,10 @@ export type DomainErrorCode =
   | 'FEE_NOT_ACTIVE'
   | 'IDEMPOTENCY_CONFLICT'
   | 'INVALID_STATE'
-  | 'UPSTREAM_UNAVAILABLE';
+  | 'UPSTREAM_UNAVAILABLE'
+  | 'UNAUTHENTICATED'
+  | 'MFA_REQUIRED'
+  | 'RATE_LIMITED';
 
 export class DomainError extends Error {
   constructor(

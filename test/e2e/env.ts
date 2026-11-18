@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,7 +12,15 @@ const fixtures = mkdtempSync(path.join(os.tmpdir(), 'unimak-portal-'));
 cpSync(path.resolve(__dirname, '../../fixtures/portal'), fixtures, { recursive: true });
 writeFileSync(path.join(fixtures, 'notifications.log.json'), '[]');
 
+// Stand-in for Supabase Auth's signing key: tests sign tokens, the app reads the JWKS.
+const jwt = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+const jwk = { ...jwt.publicKey.export({ format: 'jwk' }), kid: 'e2e-key', alg: 'ES256', use: 'sig' };
+
 Object.assign(process.env, {
+  AUTH_JWKS_JSON: JSON.stringify({ keys: [jwk] }),
+  AUTH_JWT_ISSUER: 'https://e2e.supabase.test/auth/v1',
+  E2E_JWT_PRIVATE_KEY: jwt.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
+  ADMIN_REQUIRE_MFA: 'true',
   NODE_ENV: 'test',
   DATABASE_URL: TEST_DATABASE_URL,
   DIRECT_URL: TEST_DATABASE_URL,

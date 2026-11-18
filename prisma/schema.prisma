@@ -284,6 +284,10 @@ model WebhookEvent {
   error       String?
   receivedAt  DateTime           @default(now())
   processedAt DateTime?
+  /// set when an admin resolves an UNMATCHED / FAILED event (reconciliation)
+  resolvedAt  DateTime?
+  resolvedBy  String?            @db.Uuid
+  resolution  String?
 
   @@index([status])
 }
@@ -380,6 +384,8 @@ model Transfer {
   destinationAccount String
   amount             BigInt
   status             TransferStatus @default(PENDING)
+  /// 1 for the first send; an admin retry after FAILED increments it (new Idempotency-Key)
+  attempt            Int            @default(1)
   monimeTransferId   String?        @unique
   failureCode        String?
   failureMessage     String?
@@ -425,6 +431,69 @@ model Payout {
   financialAccount FinancialAccount @relation(fields: [financialAccountId], references: [id])
 
   @@index([financialAccountId, status])
+}
+
+// ───────────────────────────── Admin users & audit ─────────────────────────────
+
+enum AdminRole {
+  SUPER_ADMIN
+  BURSAR
+  FINANCE_OFFICER
+  HEAD_OF_DEPARTMENT
+  AUDITOR
+}
+
+/// Invite-only: a Supabase Auth user can use the admin API only if an active
+/// AdminUser with their email exists. Bound to the Supabase user id on first login.
+model AdminUser {
+  id               String    @id @default(uuid()) @db.Uuid
+  email            String    @unique
+  /// Supabase Auth user id (JWT sub), set on first login
+  authUserId       String?   @unique @db.Uuid
+  name             String?
+  role             AdminRole
+  /// granted on top of the role's bundle (e.g. instalments.manage)
+  extraPermissions String[]  @default([])
+  /// HEAD_OF_DEPARTMENT scope
+  departments      String[]  @default([])
+  active           Boolean   @default(true)
+  lastLoginAt      DateTime?
+  createdBy        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+/// Every admin write, with before/after values.
+model AuditLog {
+  id       String   @id @default(uuid()) @db.Uuid
+  /// AdminUser id, or "cli:<user>" / "system"
+  actorId  String
+  action   String
+  entity   String
+  entityId String
+  before   Json?
+  after    Json?
+  at       DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([actorId, at])
+}
+
+// ───────────────────────────── USSD sessions ─────────────────────────────
+
+/// Server-side state of a Monime USSD flow session. The flow's own flowData is
+/// untrusted input; what the subscriber may do next is decided from this row.
+model UssdSession {
+  /// Monime global.sessionId
+  id           String   @id @db.VarChar(100)
+  /// Monime global.subscriberId (uuidv5 of the MSISDN)
+  subscriberId String   @db.VarChar(100)
+  state        Json
+  lookups      Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([subscriberId, createdAt])
 }
 
 // ───────────────────────────── Dev-only mocks ─────────────────────────────

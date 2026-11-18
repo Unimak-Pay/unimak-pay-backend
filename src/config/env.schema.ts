@@ -97,6 +97,33 @@ export class EnvSchema {
   @IsOptional()
   PLATFORM_MONIME_ACCOUNT?: string;
 
+  // ---- Admin auth (Supabase Auth) ----
+  /** e.g. https://<ref>.supabase.co — JWKS + issuer come from here */
+  @IsUrl({ require_tld: false })
+  @IsOptional()
+  SUPABASE_URL?: string;
+
+  /** Legacy HS256 JWT secret; only needed if the project still signs with it. */
+  @IsString()
+  @MinLength(32)
+  @IsOptional()
+  SUPABASE_JWT_SECRET?: string;
+
+  /** Static JWKS JSON ({"keys":[...]}) instead of fetching — tests / offline. */
+  @IsString()
+  @IsOptional()
+  AUTH_JWKS_JSON?: string;
+
+  /** Overrides the expected issuer (default `${SUPABASE_URL}/auth/v1`). */
+  @IsString()
+  @IsOptional()
+  AUTH_JWT_ISSUER?: string;
+
+  /** Require aal2 (2FA) for SUPER_ADMIN and BURSAR. */
+  @Transform(({ value }) => value === undefined ? true : value === true || value === 'true')
+  @IsBoolean()
+  ADMIN_REQUIRE_MFA = true;
+
   // ---- Channel API / cron ----
   /** JSON array: [{"id":"ussd","apiKey":"...","secret":"..."}] */
   @IsString()

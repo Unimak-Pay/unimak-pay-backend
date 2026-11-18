@@ -21,3 +21,18 @@ export function monimeEvent(http: Http, name: string, object: Record<string, unk
   const header = signMonimePayload(raw, TEST_WEBHOOK_SECRET, String(Math.floor(Date.now() / 1000)));
   return http.post('/webhooks/monime').set('content-type', 'application/json').set('Monime-Signature', header).send(raw);
 }
+
+/** Supabase-shaped access token signed with the e2e key (see env.ts). */
+export function adminToken(c: { sub: string; email?: string; aal?: 'aal1' | 'aal2'; exp?: number; role?: string }): string {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createPrivateKey, sign } = require('node:crypto') as typeof import('node:crypto');
+  const now = Math.floor(Date.now() / 1000);
+  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const head = b64({ alg: 'ES256', kid: 'e2e-key', typ: 'JWT' });
+  const body = b64({
+    iss: 'https://e2e.supabase.test/auth/v1', aud: 'authenticated', role: c.role ?? 'authenticated',
+    sub: c.sub, email: c.email, aal: c.aal ?? 'aal1', iat: now, exp: c.exp ?? now + 3600, session_id: 's',
+  });
+  const key = createPrivateKey(process.env.E2E_JWT_PRIVATE_KEY!);
+  return `${head}.${body}.${sign('sha256', Buffer.from(`${head}.${body}`), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
+}

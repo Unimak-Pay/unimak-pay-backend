@@ -33,11 +33,12 @@ export class CommissionTransferService {
 
     try {
       const res = await this.monime.createInternalTransfer({
-        idempotencyKey: `commission-${p.paymentId}`,
+        // a failed transfer's key can't be reused, so admin retries get a new one
+        idempotencyKey: transfer.attempt === 1 ? `commission-${p.paymentId}` : `commission-${p.paymentId}-${transfer.attempt}`,
         amount: transfer.amount,
         sourceAccountId: transfer.sourceAccount,
         destinationAccountId: transfer.destinationAccount,
-        metadata: { transferId: transfer.id, paymentId: p.paymentId, kind: 'commission' },
+        metadata: { transferId: transfer.id, paymentId: p.paymentId, kind: 'commission', attempt: String(transfer.attempt) },
       });
       const status = STATUS[res.status];
       await this.prisma.transfer.updateMany({

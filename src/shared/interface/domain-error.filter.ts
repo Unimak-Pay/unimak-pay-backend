@@ -17,6 +17,9 @@ const STATUS: Record<DomainErrorCode, HttpStatus> = {
   IDEMPOTENCY_CONFLICT: HttpStatus.CONFLICT,
   INVALID_STATE: HttpStatus.CONFLICT,
   UPSTREAM_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
+  UNAUTHENTICATED: HttpStatus.UNAUTHORIZED,
+  MFA_REQUIRED: HttpStatus.FORBIDDEN,
+  RATE_LIMITED: HttpStatus.TOO_MANY_REQUESTS,
 };
 
 /** DomainError → { error: { code, message, details } } with a mapped status. */
