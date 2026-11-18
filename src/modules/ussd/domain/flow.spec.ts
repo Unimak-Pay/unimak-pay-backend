@@ -18,3 +18,12 @@ describe('USSD flow helpers', () => {
     expect(parseExchangeRequest({ global: { sessionId: 's', subscriberId: 'u' }, currentPage: 'x', flowData: { a: '1', b: 2 } })?.flowData).toEqual({ a: '1' });
   });
 });
+
+describe('collect_payment amount', () => {
+  it('is in major units', () => {
+    const { toMajorAmount } = jest.requireActual('./flow');
+    expect(toMajorAmount(250_000n)).toBe('2500');
+    expect(toMajorAmount(250_050n)).toBe('2500.50');
+    expect(toMajorAmount(5n)).toBe('0.05');
+  });
+});

@@ -62,7 +62,7 @@ describe('Monime webhook parsing', () => {
       monimePaymentId: 'spm-1', financialAccountId: 'fa-unimak-application', currency: 'SLE', amount: 15_000n, fees: 150n,
       reference: '11111111-2222-3333-4444-555555555555',
       metadata: { paymentId: 'from-payment', source: 'ussd', n: '3' },
-      ownerId: 'pmc-1', ownerType: 'payment_code',
+      ownerId: 'pmc-1', ownerType: 'payment_code', payerPhone: null,
     });
   });
 
@@ -93,18 +93,24 @@ describe('treasury event parsing', () => {
     }))).toEqual({ monimePayoutId: 'pyt-1', amount: 100000n, fees: 500n, failure: null, metadata: { payoutId: 'p-1' } });
   });
 
-  it('reads financial_account.* leniently', () => {
+  it('reads financial_account.* in the AccountCredited shape (fac_events)', () => {
     const { parseAccountMovement } = jest.requireActual('./monime-webhook');
-    // FinancialTransaction-like
+    expect(parseAccountMovement(env('financial_account.credited', { id: 'fac-1', type: 'financial_account' }, {
+      transactionId: 'txn-1', transactionReference: 'ref-9', amount: { currency: 'SLE', value: '15000' },
+      newBalance: { currency: 'SLE', value: '99000' }, creditTime: '2026-11-18T09:00:00Z', metadata: {},
+    }))).toEqual({ accountId: 'fac-1', amount: 15000n, balanceAfter: 99000n, transactionId: 'txn-1', transactionReference: 'ref-9', at: new Date('2026-11-18T09:00:00Z') });
+    // nested under debited, account inside data
+    expect(parseAccountMovement(env('financial_account.debited', {}, {
+      account: { id: 'fac-2' }, debited: { amount: { currency: 'SLE', value: 500 }, newBalance: { currency: 'SLE', value: 42 }, debitTime: '2026-11-18T10:00:00Z' },
+    }))).toMatchObject({ accountId: 'fac-2', amount: 500n, balanceAfter: 42n });
+  });
+
+  it('falls back to other shapes and never throws', () => {
+    const { parseAccountMovement } = jest.requireActual('./monime-webhook');
     expect(parseAccountMovement(env('financial_account.credited', { id: 'txn-1', type: 'financial_transaction' }, {
-      id: 'txn-1', type: 'credit', amount: { currency: 'SLE', value: 15000 }, financialAccount: { id: 'fac-1', balance: { after: { currency: 'SLE', value: 99000 } } },
-    }))).toEqual({ accountId: 'fac-1', amount: 15000n, balanceAfter: 99000n });
-    // FinancialAccount-like
-    expect(parseAccountMovement(env('financial_account.debited', { id: 'fac-2', type: 'financial_account' }, {
-      id: 'fac-2', balance: { available: { currency: 'SLE', value: '42' } },
-    }))).toEqual({ accountId: 'fac-2', amount: null, balanceAfter: 42n });
-    // unknown shape: no throw
-    expect(parseAccountMovement(env('financial_account.credited', {}, { foo: 1 }))).toEqual({ accountId: null, amount: null, balanceAfter: null });
+      id: 'txn-1', amount: { currency: 'SLE', value: 15000 }, financialAccount: { id: 'fac-1', balance: { after: { currency: 'SLE', value: 99000 } } },
+    }))).toMatchObject({ accountId: 'fac-1', balanceAfter: 99000n });
+    expect(parseAccountMovement(env('financial_account.credited', {}, { foo: 1 }))).toMatchObject({ accountId: null, amount: null, balanceAfter: null });
   });
 });
 

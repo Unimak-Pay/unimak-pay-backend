@@ -1,6 +1,6 @@
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { decryptExchange, decryptReply, encryptAsMonime, encryptReply, ExchangeCryptoError } from './exchange-crypto';
-import { msisdnMatchesSubscriber, toInternationalMsisdn, uuidv5Url } from './subscriber-id';
+import { toInternationalMsisdn } from '../../../shared/domain/phone';
 
 const current = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const previous = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -41,16 +41,11 @@ describe('USSD exchange crypto (RSA-OAEP-SHA256 + AES-128-GCM)', () => {
   });
 });
 
-describe('subscriberId (uuidv5 of the MSISDN, URL namespace)', () => {
-  it('matches the test vector from Monime docs', () => {
-    expect(uuidv5Url('+23276123456')).toBe('c9b4e86f-a1d8-5056-8dc4-5d1aafc6994a');
-  });
-  it('matches exported numbers in local or international format', () => {
-    const id = 'c9b4e86f-a1d8-5056-8dc4-5d1aafc6994a';
-    expect(msisdnMatchesSubscriber('+23276123456', id)).toBe(true);
-    expect(msisdnMatchesSubscriber('076123456', id)).toBe(true);
-    expect(msisdnMatchesSubscriber('+23276123457', id)).toBe(false);
-    expect(msisdnMatchesSubscriber('+23276****56', id)).toBe(false);
+describe('MSISDN normalisation', () => {
+  it('normalises Sierra Leone numbers to +232…', () => {
     expect(toInternationalMsisdn('23276123456')).toBe('+23276123456');
+    expect(toInternationalMsisdn('076123456')).toBe('+23276123456');
+    expect(toInternationalMsisdn('+23276123456')).toBe('+23276123456');
+    expect(toInternationalMsisdn('+23276****56')).toBeNull();
   });
 });

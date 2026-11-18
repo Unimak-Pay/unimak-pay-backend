@@ -5,23 +5,24 @@ import request from 'supertest';
 import { createApp } from '../../src/bootstrap';
 import { ProvisionAccountsUseCase } from '../../src/modules/treasury/application/provision-accounts.use-case';
 import { decryptReply, encryptAsMonime } from '../../src/modules/ussd/domain/exchange-crypto';
-import { uuidv5Url } from '../../src/modules/ussd/domain/subscriber-id';
+import { monimeEvent } from './helpers';
 
 let app: INestApplication;
 let http: ReturnType<typeof request>;
 const prisma = new PrismaClient();
 const URL = `/v1/ussd/exchange/${process.env.USSD_EXCHANGE_PATH_TOKEN}`;
-const PHONE = '+23276123456';
-const SUBSCRIBER = uuidv5Url(PHONE); // as Monime derives global.subscriberId
+const SUBSCRIBER = randomUUID();
 
-type Reply = { action: 'navigate'; pageId: string; pageData: { message?: string; items?: { value: string; label: string }[] } } | { action: 'stop'; message: string };
+type Nav = { action: 'navigate'; pageId: string; pageData: Record<string, unknown> & { fees?: { value: string; label: string }[] } };
+type Reply = Nav | { action: 'stop'; message: string };
 
 /** One exchange call, encrypted exactly like Monime does it. */
-async function exchange(session: string, currentPage: string, flowData: Record<string, string> = {}, opts: { exportedData?: Record<string, string>; subscriberId?: string; previousKey?: boolean } = {}): Promise<Reply> {
+async function exchange(session: string, currentPage: string, flowData: Record<string, string>, opts: { subscriberId?: string; previousKey?: boolean } = {}): Promise<Reply> {
   const pub = createPublicKey(opts.previousKey ? process.env.E2E_USSD_PREVIOUS_PUBLIC_KEY! : process.env.E2E_USSD_PUBLIC_KEY!);
   const payload = {
     global: { sessionId: session, networkName: 'Orange', subscriberId: opts.subscriberId ?? SUBSCRIBER, subscriberMsisdn: '+23276****56', networkProviderName: 'Orange Money' },
-    currentPage, flowData, ...(opts.exportedData ? { exportedData: opts.exportedData } : {}),
+    currentPage,
+    flowData,
   };
   const { body, aesKey } = encryptAsMonime(payload, pub);
   const res = await http.post(URL).set('content-type', 'application/json').send(body).expect(200);
@@ -29,17 +30,26 @@ async function exchange(session: string, currentPage: string, flowData: Record<s
   return decryptReply(res.text, aesKey) as Reply;
 }
 
-/** Walks start → … → enter_id; returns the session id and the reply after enter_id. */
-async function toPayer(intent: string, kind: string, ref: string, subscriberId = SUBSCRIBER) {
-  const s = `sess-${randomUUID()}`;
+/** A USSD session that accumulates flowData like Monime does (keyed by page id). */
+function session(subscriberId = SUBSCRIBER) {
+  const id = `sess-${randomUUID()}`;
   const flow: Record<string, string> = {};
-  expect((await exchange(s, 'start', flow, { subscriberId })).action).toBe('navigate');
-  Object.assign(flow, { main_menu: intent });
-  await exchange(s, 'main_menu', flow, { subscriberId });
-  Object.assign(flow, { id_type: kind });
-  await exchange(s, 'id_type', flow, { subscriberId });
-  Object.assign(flow, { enter_id: ref });
-  return { s, flow, reply: await exchange(s, 'enter_id', flow, { subscriberId }) };
+  return {
+    id,
+    step: (page: string, value: string, opts: { previousKey?: boolean } = {}) => {
+      flow[page] = value;
+      return exchange(id, page, { ...flow }, { subscriberId, ...opts });
+    },
+  };
+}
+
+async function toPayer(intent: string, kind: 'student' | 'applicant', ref: string, subscriberId = SUBSCRIBER) {
+  const s = session(subscriberId);
+  expect(await s.step('home', intent)).toEqual({ action: 'navigate', pageId: 'id_type', pageData: {} });
+  const prompt = await s.step('id_type', kind);
+  expect(prompt).toMatchObject({ pageId: kind === 'student' ? 'enter_student_id' : 'enter_application_ref' });
+  const page = kind === 'student' ? 'enter_student_id' : 'enter_application_ref';
+  return { s, page, reply: await s.step(page, ref) };
 }
 
 beforeAll(async () => {
@@ -60,8 +70,8 @@ describe('USSD exchange endpoint security', () => {
   });
 
   it('refuses plaintext and undecryptable / tampered requests', async () => {
-    await http.post(URL).send({ global: { sessionId: 'x', subscriberId: 'y' }, currentPage: 'start', flowData: {} }).expect(400);
-    const { body } = encryptAsMonime({ currentPage: 'start' }, createPublicKey(process.env.E2E_USSD_PUBLIC_KEY!));
+    await http.post(URL).send({ global: { sessionId: 'x', subscriberId: 'y' }, currentPage: 'home', flowData: { home: 'pay' } }).expect(400);
+    const { body } = encryptAsMonime({ currentPage: 'home' }, createPublicKey(process.env.E2E_USSD_PUBLIC_KEY!));
     const blob = Buffer.from(body.encryptedExchangeData, 'base64');
     blob[blob.length - 1] = blob[blob.length - 1]! ^ 1;
     const res = await http.post(URL).send({ ...body, encryptedExchangeData: blob.toString('base64') }).expect(400);
@@ -69,46 +79,51 @@ describe('USSD exchange endpoint security', () => {
   });
 
   it('accepts the previous key during rotation', async () => {
-    const r = await exchange(`sess-${randomUUID()}`, 'start', {}, { previousKey: true });
-    expect(r).toMatchObject({ action: 'navigate', pageId: 'main_menu' });
+    expect(await session().step('home', 'pay', { previousKey: true })).toMatchObject({ action: 'navigate', pageId: 'id_type' });
   });
 
   it('ignores flowData that skips ahead (server-side session state)', async () => {
-    const s = `sess-${randomUUID()}`;
-    await exchange(s, 'start');
-    expect(await exchange(s, 'confirm_amount', { confirm_amount: 'yes' })).toEqual({ action: 'stop', message: 'Session expired. Please dial again.' });
-    // and a session id replayed from another subscriber
-    const t = `sess-${randomUUID()}`;
-    await exchange(t, 'start');
-    expect(await exchange(t, 'main_menu', { main_menu: 'pay' }, { subscriberId: uuidv5Url('+23277000000') })).toMatchObject({ action: 'stop' });
+    const s = session();
+    await s.step('home', 'pay');
+    expect(await s.step('confirm_payment', 'confirm')).toEqual({ action: 'stop', message: 'Session expired. Please dial again.' });
+    // a session id replayed by another subscriber
+    const t = session();
+    await t.step('home', 'pay');
+    expect(await exchange(t.id, 'id_type', { home: 'pay', id_type: 'student' }, { subscriberId: randomUUID() })).toMatchObject({ action: 'stop' });
   });
 
   it('rate-limits ID lookups per subscriber', async () => {
-    const sub = uuidv5Url('+23299111111');
+    const sub = randomUUID();
     for (let i = 0; i < 4; i++) {
-      // each session: 1 hit + 2 retries = 3 lookups
-      const { s, flow } = await toPayer('balance', 'student', 'NOPE-1', sub);
-      await exchange(s, 'enter_id', { ...flow, enter_id: 'NOPE-2' }, { subscriberId: sub });
-      const last = await exchange(s, 'enter_id', { ...flow, enter_id: 'NOPE-3' }, { subscriberId: sub });
-      if (i < 3) expect(last).toEqual({ action: 'stop', message: 'ID not found. Please check the number and try again.' });
-      else expect(last).toEqual({ action: 'stop', message: 'Too many lookups. Please try again later.' });
+      // each session: 1 lookup + 2 retries = 3 lookups
+      const { s, page } = await toPayer('balance', 'student', 'NOPE-1', sub);
+      await s.step('try_again', 'retry');
+      await s.step(page, 'NOPE-2');
+      await s.step('try_again', 'retry');
+      const last = await s.step(page, 'NOPE-3');
+      expect(last).toEqual({
+        action: 'stop',
+        message: i < 3 ? 'Student ID not found. Please check it and try again later.' : 'Too many lookups. Please try again later.',
+      });
     }
   });
 });
 
 describe('USSD menus', () => {
   it('help ends the session with the finance office number', async () => {
-    const s = `sess-${randomUUID()}`;
-    const menu = await exchange(s, 'start');
-    expect(menu).toMatchObject({ pageId: 'main_menu', pageData: { items: expect.arrayContaining([{ value: 'help', label: 'Help' }]) } });
-    expect(await exchange(s, 'main_menu', { main_menu: 'help' })).toMatchObject({ action: 'stop', message: expect.stringMatching(/Finance Office/) });
+    expect(await session().step('home', 'help')).toMatchObject({ action: 'stop', message: expect.stringMatching(/Finance Office/) });
   });
 
-  it('wrong ID: two retries, then the session ends', async () => {
-    const { s, flow, reply } = await toPayer('pay', 'student', 'UNI-0000');
-    expect(reply).toMatchObject({ action: 'navigate', pageId: 'enter_id', pageData: { message: 'ID not found. Enter it again (2 left)' } });
-    expect(await exchange(s, 'enter_id', { ...flow, enter_id: 'UNI-0001' })).toMatchObject({ pageData: { message: 'ID not found. Enter it again (1 left)' } });
-    expect(await exchange(s, 'enter_id', { ...flow, enter_id: 'UNI-0002' })).toMatchObject({ action: 'stop' });
+  it('wrong ID: try again twice, then the session ends; cancel ends it too', async () => {
+    const { s, page, reply } = await toPayer('pay', 'student', 'uni-0000');
+    expect(reply).toEqual({ action: 'navigate', pageId: 'try_again', pageData: { message: 'Student ID UNI-0000 not found.' } });
+    expect(await s.step('try_again', 'retry')).toEqual({ action: 'navigate', pageId: page, pageData: {} });
+    expect(await s.step(page, 'UNI-0001')).toMatchObject({ pageId: 'try_again' });
+    await s.step('try_again', 'retry');
+    expect(await s.step(page, 'UNI-0002')).toMatchObject({ action: 'stop' });
+
+    const c = await toPayer('pay', 'applicant', 'APP-0000');
+    expect(await c.s.step('try_again', 'cancel')).toEqual({ action: 'stop', message: 'Cancelled.' });
   });
 
   it('check balance lists fees with balances', async () => {
@@ -117,47 +132,64 @@ describe('USSD menus', () => {
   });
 });
 
-describe('USSD payment journey', () => {
+describe('USSD payment journey (collect_payment)', () => {
   let paymentId: string;
 
-  it('student pays a tuition instalment and shares their number', async () => {
-    const { s, flow, reply } = await toPayer('pay', 'student', 'uni-2026-0005');
-    expect(reply).toMatchObject({ action: 'navigate', pageId: 'confirm_payer', pageData: { message: 'I*** K*** - BSC-NUR · Level 1' } });
+  it('student pays a tuition instalment; the flow hands over to collect_payment', async () => {
+    const { s, reply } = await toPayer('pay', 'student', 'uni-2026-0005');
+    expect(reply).toEqual({ action: 'navigate', pageId: 'confirm_payer', pageData: { payer_name: 'I*** K***', program_line: 'BSC-NUR · Level 1' } });
 
-    flow.confirm_payer = 'yes';
-    const fees = await exchange(s, 'confirm_payer', flow);
-    expect(fees).toMatchObject({ pageId: 'select_fee' });
-    const items = (fees as Extract<Reply, { action: 'navigate' }>).pageData.items!;
-    expect(items.map((i) => i.label)).toEqual(['Tuition 2026/27 bal SLE 7,000', 'Matriculation 2026-SEP bal SLE 250']);
+    const fees = (await s.step('confirm_payer', 'continue')) as Nav;
+    expect(fees.pageId).toBe('select_fee');
+    expect(fees.pageData.fees!.map((f) => f.label)).toEqual(['Tuition 2026/27 bal SLE 7,000', 'Matriculation 2026-SEP bal SLE 250']);
 
-    flow.select_fee = items[0]!.value;
-    expect(await exchange(s, 'select_fee', flow)).toMatchObject({ pageId: 'enter_amount', pageData: { message: 'Enter amount (min SLE 2,000, max SLE 7,000)' } });
-    flow.enter_amount = '1000';
-    expect(await exchange(s, 'enter_amount', flow)).toMatchObject({ pageId: 'enter_amount', pageData: { message: 'Enter SLE 2,000 to SLE 7,000' } });
-    flow.enter_amount = '2500';
-    expect(await exchange(s, 'enter_amount', flow)).toMatchObject({ pageId: 'confirm_amount', pageData: { message: 'Pay SLE 2,500?' } });
-    flow.confirm_amount = 'yes';
-    expect(await exchange(s, 'confirm_amount', flow)).toEqual({ action: 'navigate', pageId: 'share_number', pageData: {} });
+    const amountPage = { fee_name: 'Tuition 2026/27', min_display: 'SLE 2,000', max_display: 'SLE 7,000' };
+    expect(await s.step('select_fee', fees.pageData.fees![0]!.value)).toEqual({ action: 'navigate', pageId: 'enter_amount', pageData: amountPage });
+    expect(await s.step('enter_amount', '1000')).toEqual({ action: 'navigate', pageId: 'try_again', pageData: { message: 'Enter an amount from SLE 2,000 to SLE 7,000.' } });
+    expect(await s.step('try_again', 'retry')).toEqual({ action: 'navigate', pageId: 'enter_amount', pageData: amountPage });
+    expect(await s.step('enter_amount', '2,500')).toEqual({
+      action: 'navigate', pageId: 'confirm_payment', pageData: { payer_name: 'I*** K***', fee_name: 'Tuition 2026/27', amount_display: 'SLE 2,500' },
+    });
 
-    flow.share_number = PHONE;
-    const done = await exchange(s, 'share_number', flow, { exportedData: { phone_number: PHONE } });
-    expect(done).toMatchObject({ action: 'stop', message: expect.stringMatching(/^Dial \*715\*1\*\d+# to pay SLE 2,500\. Valid 1[45] min\. Receipt by SMS\.$/) });
-
-    const p = await prisma.payment.findFirstOrThrow({ where: { clientId: 'ussd-flow', idempotencyKey: `${s}:share_number` } });
-    expect(p).toMatchObject({ amount: 250_000n, channel: 'USSD', payerPhone: PHONE, phoneAuthorized: true, status: 'PENDING' });
-    const code = await prisma.mockMonimeRecord.findUniqueOrThrow({ where: { id: p.monimeRef! } });
-    expect((code.data as Record<string, unknown>)['authorizedPhoneNumber']).toBe(PHONE);
+    const pay = (await s.step('confirm_payment', 'confirm')) as Nav;
+    const tuition = await prisma.financialAccount.findUniqueOrThrow({ where: { reference: 'unimak-fee-tuition' } });
+    const p = await prisma.payment.findFirstOrThrow({ where: { clientId: 'ussd-flow', idempotencyKey: `${s.id}:confirm_payment` } });
+    expect(pay).toEqual({
+      action: 'navigate',
+      pageId: 'make_payment',
+      pageData: {
+        amount: '2500', // collect_payment takes major units
+        payment_target_ref: tuition.uvan,
+        reference: p.id,
+        receipt_name: 'Tuition 2026/27',
+        payment_id: p.id,
+        financial_account_id: tuition.monimeId,
+        fee_name: 'Tuition 2026/27',
+        amount_display: 'SLE 2,500',
+        payment_message: 'Paying SLE 2,500 for Tuition 2026/27. Your receipt will come by SMS.',
+        payment_ref: p.id.slice(0, 8).toUpperCase(),
+      },
+    });
+    // a PENDING hold, no payment code: collection happens inside the USSD session
+    expect(p).toMatchObject({ amount: 250_000n, channel: 'USSD', status: 'PENDING', collectionMethod: 'USSD_FLOW', monimeRef: null, payerPhone: '+23230200005' });
     paymentId = p.id;
 
-    // a repeated submit of the last step does not create a second payment
-    expect((await exchange(s, 'share_number', flow, { exportedData: { phone_number: PHONE } })).action).toBe('stop');
-    expect(await prisma.payment.count({ where: { idempotencyKey: { startsWith: s } } })).toBe(1);
+    // a repeated submit does not create a second payment
+    expect(await s.step('confirm_payment', 'confirm')).toMatchObject({ action: 'stop' });
+    expect(await prisma.payment.count({ where: { idempotencyKey: { startsWith: s.id } } })).toBe(1);
   });
 
-  it('receipt SMS goes to the paying phone and to the phone on the portal record', async () => {
-    await http.post('/dev/monime/simulate-webhook').send({ paymentId, outcome: 'completed' }).expect(200);
+  it('settles from payment.processing_completed; receipt goes to the paying phone and the portal phone', async () => {
+    const res = await monimeEvent(http, 'payment.processing_completed', { id: 'pay-ussd-1', type: 'payment' }, {
+      id: 'pay-ussd-1', status: 'completed', amount: { currency: 'SLE', value: 250000 },
+      channel: { type: 'momo', provider: 'm17', phoneNumber: '23276123456' },
+      financialAccountId: 'fac-mock-unimak-fee-tuition', reference: paymentId,
+      metadata: { payment_id: paymentId, financial_account_id: 'fac-mock-unimak-fee-tuition' },
+      fees: [{ code: 'processing', amount: { currency: 'SLE', value: 2500 } }],
+    }).expect(200);
+    expect(res.body.result).toBe('PROCESSED');
     const sms = await prisma.outboxMessage.findMany({ where: { dedupeKey: { startsWith: `sms.receipt:${paymentId}` } } });
-    expect(sms.map((m) => (m.payload as { phone: string }).phone).sort()).toEqual([PHONE, '+23230200005'].sort());
+    expect(sms.map((m) => (m.payload as { phone: string }).phone).sort()).toEqual(['+23230200005', '+23276123456']);
   });
 
   it('resend last receipt', async () => {
@@ -165,20 +197,38 @@ describe('USSD payment journey', () => {
     expect(reply).toMatchObject({ action: 'stop', message: expect.stringMatching(/^Receipt UNIMAK-\d{4}-\d{6} sent by SMS\.$/) });
   });
 
-  it('a parent paying the application fee without sharing their number gets an open code', async () => {
-    const { s, flow } = await toPayer('pay', 'applicant', 'APP-2026-0002');
-    flow.confirm_payer = 'yes';
-    const fees = (await exchange(s, 'confirm_payer', flow)) as Extract<Reply, { action: 'navigate' }>;
-    flow.select_fee = fees.pageData.items![0]!.value;
-    expect(await exchange(s, 'select_fee', flow)).toMatchObject({ pageId: 'confirm_amount', pageData: { message: 'Pay SLE 150 for Application fee 2026-SEP?' } });
-    flow.confirm_amount = 'yes';
-    await exchange(s, 'confirm_amount', flow);
-    // a number that doesn't hash to this subscriber is ignored (tampered exportedData)
-    const done = await exchange(s, 'share_number', flow, { exportedData: { phone_number: '+23277999999' } });
-    expect(done).toMatchObject({ action: 'stop', message: expect.stringMatching(/^Dial /) });
-    const p = await prisma.payment.findFirstOrThrow({ where: { idempotencyKey: `${s}:share_number` } });
-    expect(p).toMatchObject({ phoneAuthorized: false, payerPhone: '+23277100002' });
-    const code = await prisma.mockMonimeRecord.findUniqueOrThrow({ where: { id: p.monimeRef! } });
-    expect((code.data as Record<string, unknown>)['authorizedPhoneNumber']).toBeNull();
+  it('cancel at confirmation shows the cancelled page and creates nothing', async () => {
+    const { s } = await toPayer('pay', 'applicant', 'APP-2026-0002');
+    const fees = (await s.step('confirm_payer', 'continue')) as Nav;
+    expect(await s.step('select_fee', fees.pageData.fees![0]!.value)).toMatchObject({ pageId: 'confirm_payment', pageData: { amount_display: 'SLE 150' } });
+    expect(await s.step('confirm_payment', 'cancel')).toEqual({ action: 'navigate', pageId: 'payment_cancelled', pageData: {} });
+    expect(await prisma.payment.count({ where: { idempotencyKey: { startsWith: s.id } } })).toBe(0);
+  });
+
+  it('collection never fails once at Monime: a late completion after expiry is still applied (overpayment flagged)', async () => {
+    async function startAppFee(): Promise<string> {
+      const { s } = await toPayer('pay', 'applicant', 'APP-2026-0002');
+      const fees = (await s.step('confirm_payer', 'continue')) as Nav;
+      await s.step('select_fee', fees.pageData.fees![0]!.value);
+      const pay = (await s.step('confirm_payment', 'confirm')) as Nav;
+      return pay.pageData.payment_id as string;
+    }
+    const complete = (id: string, monimeId: string) =>
+      monimeEvent(http, 'payment.processing_completed', { id: monimeId, type: 'payment' }, {
+        id: monimeId, status: 'completed', amount: { currency: 'SLE', value: 15000 }, reference: id, metadata: { payment_id: id },
+        fees: [{ code: 'processing', amount: { currency: 'SLE', value: 150 } }], // USSD 1%
+      }).expect(200);
+
+    const first = await startAppFee();
+    // the payer took longer than 15 min to approve: the hold lapses…
+    await prisma.payment.update({ where: { id: first }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    await http.get('/cron/expire-payments').set('authorization', `Bearer ${process.env.CRON_SECRET}`).expect(200);
+    // …someone pays again and it completes
+    const second = await startAppFee();
+    expect((await complete(second, 'pay-app-2')).body.result).toBe('PROCESSED');
+    // then the first one completes after all: money moved, so it is applied
+    const late = await complete(first, 'pay-app-1');
+    expect(late.body).toMatchObject({ result: 'PROCESSED', note: 'Late settlement: payment was EXPIRED; Overpaid by 15000 (obligation balance below zero)' });
+    expect(await prisma.payment.findUnique({ where: { id: first } })).toMatchObject({ status: 'COMPLETED' });
   });
 });

@@ -14,7 +14,7 @@ import { PAYMENT_REPOSITORY, type PaymentRecord, type PaymentRepository } from '
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Where our payment id may come back in a Monime Payment. */
-const PAYMENT_ID_METADATA_KEYS = ['paymentId', 'unimakPaymentId'];
+const PAYMENT_ID_METADATA_KEYS = ['paymentId', 'payment_id', 'unimakPaymentId'];
 
 /** A completed Monime Payment, already parsed from the webhook. */
 export interface CompletedMonimePayment {
@@ -29,6 +29,8 @@ export interface CompletedMonimePayment {
   metadata: Record<string, string>;
   /** the object that owns the payment — normally what we created at initiation */
   ownerId: string | null;
+  /** number that actually paid (from the payment channel), if known */
+  payerPhone?: string | null;
   occurredAt: Date;
 }
 
@@ -90,6 +92,7 @@ export class SettlePaymentService {
     if (ev.fees !== p.monimeFee) notes.push(`Monime fees ${ev.fees}, we computed ${p.monimeFee}`);
 
     const settled = await this.complete(tx, p, ev);
+    if (settled.overpaidBy > 0n) notes.push(`Overpaid by ${settled.overpaidBy} (obligation balance below zero)`);
     if (ev.financialAccountId && ev.financialAccountId !== settled.settlementAccount) {
       notes.push(`Credited to ${ev.financialAccountId}, expected ${settled.settlementAccount}`);
     }
@@ -106,7 +109,7 @@ export class SettlePaymentService {
     tx: Db,
     p: PaymentRecord,
     ev: CompletedMonimePayment,
-  ): Promise<{ receiptNumber: string; outboxKeys: string[]; settlementAccount: string | null }> {
+  ): Promise<{ receiptNumber: string; outboxKeys: string[]; settlementAccount: string | null; overpaidBy: bigint }> {
     const completedAt = ev.occurredAt;
     await this.payments.update(
       p.id,
@@ -143,10 +146,14 @@ export class SettlePaymentService {
         },
       },
     ];
-    // Spec: the receipt also goes to the phone on the portal record when someone else paid.
-    if (o.payerPortalPhone && o.payerPortalPhone !== p.payerPhone) {
-      const first = messages[0]!;
-      messages.push({ ...first, dedupeKey: `sms.receipt:${p.id}:portal`, payload: { ...first.payload, phone: o.payerPortalPhone } } as OutboxMessageInput);
+    // Spec: the receipt goes to the paying phone and to the phone on the portal record.
+    const first = messages[0]!;
+    const extra: [string, string | null | undefined][] = [['channel', ev.payerPhone], ['portal', o.payerPortalPhone]];
+    const sent = new Set([p.payerPhone]);
+    for (const [tag, phone] of extra) {
+      if (!phone || sent.has(phone)) continue;
+      sent.add(phone);
+      messages.push({ ...first, dedupeKey: `sms.receipt:${p.id}:${tag}`, payload: { ...first.payload, phone } } as OutboxMessageInput);
     }
     if (o.feeTypeCode === APPLICATION_FEE_CODE) {
       messages.push({
@@ -164,7 +171,7 @@ export class SettlePaymentService {
       });
     }
     const outboxKeys = await this.outbox.enqueue(tx, messages);
-    return { receiptNumber: receipt.number, outboxKeys, settlementAccount: o.settlementAccount };
+    return { receiptNumber: receipt.number, outboxKeys, settlementAccount: o.settlementAccount, overpaidBy: position.balance < 0n ? -position.balance : 0n };
   }
 
   /** Our payment id (reference / metadata) first, then the Monime object ids. */

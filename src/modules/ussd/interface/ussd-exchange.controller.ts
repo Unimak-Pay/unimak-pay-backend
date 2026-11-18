@@ -13,8 +13,8 @@ import { type ExchangeReply, parseExchangeRequest } from '../domain/flow';
  * Reply: base64 AES-GCM blob, text/plain, HTTP 200 within 10 s.
  *
  * Monime does not sign these requests, so: secret URL token (wrong → 404),
- * optional IP allowlist, server-side session state, per-subscriber rate
- * limits, and every money fact checked against our own records.
+ * server-side session state, per-subscriber rate limits, and every money fact
+ * checked against our own records.
  */
 @Controller('v1/ussd/exchange')
 export class UssdExchangeController {
@@ -77,21 +77,9 @@ export class UssdExchangeController {
     }
   }
 
-  private authorize(token: string, req: Request): void {
+  private authorize(token: string, _req: Request): void {
     const expected = this.config.get('USSD_EXCHANGE_PATH_TOKEN');
     if (!expected || !safeEqual(token, expected)) throw new NotFoundException();
-    const allow = this.config.get('USSD_ALLOWED_IPS');
-    if (allow) {
-      const ip = clientIp(req);
-      if (!allow.split(',').map((s) => s.trim()).filter(Boolean).includes(ip)) {
-        this.logger.warn(`USSD exchange from non-allowlisted IP ${ip}`);
-        throw new NotFoundException();
-      }
-    }
   }
 }
 
-function clientIp(req: Request): string {
-  const fwd = req.header('x-vercel-forwarded-for') ?? req.header('x-forwarded-for') ?? '';
-  return fwd.split(',')[0]?.trim() || req.socket.remoteAddress || '';
-}

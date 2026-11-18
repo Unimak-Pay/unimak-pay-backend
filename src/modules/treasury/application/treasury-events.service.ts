@@ -72,11 +72,13 @@ export class TreasuryEventsService {
   }
 
   /** Keeps the cached balance fresh; payload shape is undocumented, so best effort. */
-  async applyAccountMovement(tx: Db, ev: ParsedAccountMovement, at: Date): Promise<SettlementResult> {
+  async applyAccountMovement(tx: Db, ev: ParsedAccountMovement, eventAt: Date): Promise<SettlementResult> {
+    let at = eventAt;
     if (!ev.accountId) return done('IGNORED', 'No financial account id in payload');
     const account = await tx.financialAccount.findUnique({ where: { monimeId: ev.accountId } });
     if (!account) return done('IGNORED', `Not a UNIMAK account (${ev.accountId})`);
     if (ev.balanceAfter === null) return done('PROCESSED', 'No balance in payload; cached balance unchanged');
+    at = ev.at ?? at;
     // Out-of-order delivery: only move forward in time.
     const r = await tx.financialAccount.updateMany({
       where: { id: account.id, OR: [{ balanceUpdatedAt: null }, { balanceUpdatedAt: { lte: at } }] },

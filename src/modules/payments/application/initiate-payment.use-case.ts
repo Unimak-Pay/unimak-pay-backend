@@ -18,6 +18,12 @@ export interface InitiatePaymentInput {
   idempotencyKey: string;
   /** restrict the payment code to payerPhone (default true) */
   phoneAuthorized?: boolean;
+  /**
+   * PAYMENT_CODE (default): we create a Monime payment code after commit.
+   * USSD_FLOW: the USSD flow's collect_payment template collects in-session;
+   * we only record the PENDING payment (the hold) and return.
+   */
+  collection?: 'PAYMENT_CODE' | 'USSD_FLOW';
 }
 
 /**
@@ -65,6 +71,7 @@ export class InitiatePaymentUseCase {
             idempotencyKey: input.idempotencyKey,
             payerPhone: input.payerPhone,
             phoneAuthorized: input.phoneAuthorized ?? true,
+            collectionMethod: input.collection ?? 'PAYMENT_CODE',
             pricingConfigId: ev.pricingConfigId,
             monimeFee: ev.split.monimeFee,
             platformFee: ev.split.platformFee,
@@ -82,6 +89,7 @@ export class InitiatePaymentUseCase {
       }
       throw err;
     }
+    if (payment.collectionMethod === 'USSD_FLOW') return this.payments.update(payment.id, { status: 'PENDING' });
     return this.startCollection(payment);
   }
 
@@ -89,6 +97,7 @@ export class InitiatePaymentUseCase {
     if (p.obligationId !== input.obligationId || p.amount !== input.amount || p.channel !== input.channel) {
       throw new DomainError('IDEMPOTENCY_CONFLICT', 'Idempotency key was used for a different payment');
     }
+    if (p.collectionMethod === 'USSD_FLOW') return p;
     if (p.status === 'INITIATED' && !p.monimeRef && p.expiresAt > now) return this.startCollection(p);
     return p;
   }

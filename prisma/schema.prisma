@@ -52,6 +52,12 @@ enum Channel {
   DOTS
 }
 
+/// How Monime collects: a payment code we create, or the USSD flow's collect_payment template.
+enum CollectionMethod {
+  PAYMENT_CODE
+  USSD_FLOW
+}
+
 enum PaymentStatus {
   INITIATED
   PENDING
@@ -237,8 +243,9 @@ model Payment {
   clientId        String
   idempotencyKey  String
   payerPhone      String
-  /// payment code restricted to payerPhone (false: USSD payer declined to share their number)
+  /// payment code restricted to payerPhone
   phoneAuthorized Boolean       @default(true)
+  collectionMethod CollectionMethod @default(PAYMENT_CODE)
   status          PaymentStatus @default(INITIATED)
   /// Monime payment code id (pmc-…) created at initiation
   monimeRef       String?       @unique

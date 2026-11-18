@@ -14,6 +14,7 @@ export interface PaymentRecord {
   idempotencyKey: string;
   payerPhone: string;
   phoneAuthorized: boolean;
+  collectionMethod: 'PAYMENT_CODE' | 'USSD_FLOW';
   status: PaymentStatus;
   monimeRef: string | null;
   ussdCode: string | null;
@@ -36,6 +37,7 @@ export interface NewPayment {
   idempotencyKey: string;
   payerPhone: string;
   phoneAuthorized: boolean;
+  collectionMethod: 'PAYMENT_CODE' | 'USSD_FLOW';
   pricingConfigId: string;
   monimeFee: Minor;
   platformFee: Minor;

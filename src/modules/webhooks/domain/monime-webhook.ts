@@ -8,6 +8,8 @@
  *     metadata, fees: [{ code, amount }], ownershipGraph: { owner: { id, type, metadata } } }
  * All payload-shape knowledge lives in this file.
  */
+import { toInternationalMsisdn } from '../../../shared/domain/phone';
+
 export const PAYMENT_COMPLETED_EVENT = 'payment.processing_completed';
 
 /** Events we subscribe to (see scripts: pnpm monime:register-webhook). */
@@ -39,6 +41,8 @@ export interface ParsedCompletedPayment {
   metadata: Record<string, string>;
   ownerId: string | null;
   ownerType: string | null;
+  /** the paying number (channel.phoneNumber for momo), international format */
+  payerPhone: string | null;
 }
 
 export class InvalidWebhookPayloadError extends Error {
@@ -84,6 +88,7 @@ export function parseCompletedPayment(env: MonimeWebhookEnvelope): ParsedComplet
     metadata: { ...asStringRecord(owner['metadata']), ...asStringRecord(data['metadata']) },
     ownerId: asString(owner['id']),
     ownerType: asString(owner['type']),
+    payerPhone: toInternationalMsisdn(asString(optionalRecord(data['channel'])['phoneNumber']) ?? ''),
   };
 }
 
@@ -130,29 +135,56 @@ export function parsePayout(env: MonimeWebhookEnvelope): ParsedPayoutUpdate {
 }
 
 /**
- * financial_account.credited / .debited — payload NOT documented by Monime.
- * Lenient on purpose (never throws): reads the account id and balance from the
- * shapes the spec suggests (FinancialTransaction or FinancialAccount).
+ * financial_account.credited / .debited. Not in Monime's public docs; the event
+ * comes from Monime's internal financialaccount AccountEvent:
+ *   { account: Account, credited|debited: { transaction_id, transaction_reference,
+ *     amount: Money, new_balance: Money, credit_time|debit_time, metadata } }
+ * (see hq-txn-monitor AccountEventDeserializer). We read its camelCase JSON form
+ * first and keep older guesses as fallbacks; never throws.
  */
 export interface ParsedAccountMovement {
   accountId: string | null;
   amount: bigint | null;
   balanceAfter: bigint | null;
+  transactionId: string | null;
+  transactionReference: string | null;
+  /** credit_time / debit_time, if present */
+  at: Date | null;
 }
 
 export function parseAccountMovement(env: MonimeWebhookEnvelope): ParsedAccountMovement {
   const { data } = env;
+  // The movement may be at the top level or nested under credited/debited.
+  const mv = { ...data, ...optionalRecord(data['credited']), ...optionalRecord(data['debited']) };
+  const account = optionalRecord(data['account']);
   const fa = optionalRecord(data['financialAccount']);
   const isAccount = (v: string | null) => (v && v.startsWith('fac-') ? v : null);
   const accountId =
+    (env.object.type === 'financial_account' ? isAccount(env.object.id) : null) ??
+    isAccount(asString(account['id'])) ??
     isAccount(asString(fa['id'])) ??
-    isAccount(asString(data['financialAccountId'])) ??
-    (env.object.type === 'financial_account' ? env.object.id : null) ??
+    isAccount(asString(mv['financialAccountId'])) ??
     isAccount(asString(data['id']));
-  const after =
-    optionalRecord(optionalRecord(fa['balance'])['after'])['value'] ??
-    optionalRecord(optionalRecord(data['balance'])['available'])['value'];
-  return { accountId, amount: optionalAmount(data['amount']), balanceAfter: toMinor(after) };
+  const money = (v: unknown) => {
+    const m = optionalRecord(v);
+    return m['currency'] === undefined || m['currency'] === 'SLE' ? toMinor(m['value']) : null;
+  };
+  const balanceAfter =
+    money(mv['newBalance']) ??
+    money(mv['new_balance']) ??
+    money(optionalRecord(fa['balance'])['after']) ??
+    money(optionalRecord(optionalRecord(account['balance']))['available']) ??
+    money(optionalRecord(data['balance'])['available']);
+  const time = asString(mv['creditTime']) ?? asString(mv['debitTime']) ?? asString(mv['credit_time']) ?? asString(mv['debit_time']);
+  const at = time ? new Date(time) : null;
+  return {
+    accountId,
+    amount: money(mv['amount']),
+    balanceAfter,
+    transactionId: asString(mv['transactionId']) ?? asString(mv['transaction_id']),
+    transactionReference: asString(mv['transactionReference']) ?? asString(mv['transaction_reference']),
+    at: at && !Number.isNaN(at.getTime()) ? at : null,
+  };
 }
 
 function optionalAmount(v: unknown): bigint | null {

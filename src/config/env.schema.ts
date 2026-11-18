@@ -141,11 +141,6 @@ export class EnvSchema {
   @IsOptional()
   USSD_EXCHANGE_PATH_TOKEN?: string;
 
-  /** Optional comma-separated source IP allowlist for the exchange endpoint. */
-  @IsString()
-  @IsOptional()
-  USSD_ALLOWED_IPS?: string;
-
   /** Dev only: accept unencrypted JSON (refused when NODE_ENV=production). */
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
