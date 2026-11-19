@@ -57,37 +57,37 @@ export class AdminCatalogController {
 
   @Get('fees')
   @RequirePermissions('fees.read')
-  fees(@Query() q: FeesQuery) {
-    return this.catalog.listFees(q);
+  async fees(@Query() q: FeesQuery) {
+    return (await this.catalog.listFees(q)).map(dueDateOnly);
   }
 
   @Get('fees/:id')
   @RequirePermissions('fees.read')
-  fee(@Param('id', ParseUUIDPipe) id: string) {
-    return this.catalog.getFee(id);
+  async fee(@Param('id', ParseUUIDPipe) id: string) {
+    return dueDateOnly(await this.catalog.getFee(id));
   }
 
   @Post('fees')
   @HttpCode(201)
   @RequirePermissions('fees.manage')
-  createFee(@CurrentAdmin() admin: AdminPrincipal, @Body() dto: CreateFeeDto) {
-    return this.catalog.createFee(admin, {
+  async createFee(@CurrentAdmin() admin: AdminPrincipal, @Body() dto: CreateFeeDto) {
+    return dueDateOnly(await this.catalog.createFee(admin, {
       feeTypeId: dto.feeTypeId, name: dto.name, period: dto.period, allowInstalments: dto.allowInstalments,
       ...(dto.defaultMinInstalment ? { defaultMinInstalment: BigInt(dto.defaultMinInstalment) } : {}),
       ...(dto.dueDate ? { dueDate: new Date(dto.dueDate) } : {}),
-    });
+    }));
   }
 
   @Patch('fees/:id')
   @RequirePermissions('fees.manage')
-  updateFee(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateFeeDto) {
-    return this.catalog.updateFee(admin, id, {
+  async updateFee(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateFeeDto) {
+    return dueDateOnly(await this.catalog.updateFee(admin, id, {
       ...(dto.name !== undefined ? { name: dto.name } : {}),
       ...(dto.allowInstalments !== undefined ? { allowInstalments: dto.allowInstalments } : {}),
       ...(dto.defaultMinInstalment !== undefined ? { defaultMinInstalment: dto.defaultMinInstalment === null ? null : BigInt(dto.defaultMinInstalment) } : {}),
       ...(dto.dueDate !== undefined ? { dueDate: dto.dueDate === null ? null : new Date(dto.dueDate) } : {}),
       ...(dto.status !== undefined ? { status: dto.status } : {}),
-    });
+    }));
   }
 
   /** What a given student / applicant would owe for this fee (live portal lookup, no writes). */
@@ -146,4 +146,9 @@ export class AdminCatalogController {
   deleteInstalment(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Param('programCode') programCode: string) {
     return this.catalog.deleteInstalmentRule(admin, id, programCode.toUpperCase());
   }
+}
+
+/** Fee.dueDate is a calendar day: YYYY-MM-DD, as it is sent. */
+function dueDateOnly<T extends { dueDate: Date | null }>(fee: T): Omit<T, 'dueDate'> & { dueDate: string | null } {
+  return { ...fee, dueDate: fee.dueDate ? fee.dueDate.toISOString().slice(0, 10) : null };
 }

@@ -11,6 +11,7 @@ import { NightlyReconciliationService } from '../../reconciliation/application/n
 import { CommissionTransferService } from '../../treasury/application/commission-transfer.service';
 import { MonimeWebhookReceiver } from '../../webhooks/application/monime-webhook.receiver';
 import { normalizePublicRef } from '../../payments/domain/payment-ref';
+import { CSV_COLUMNS, csvRow, EXPORT_BATCH, EXPORT_MAX_ROWS } from './payments-csv';
 
 export interface Page<T> {
   items: T[];
@@ -23,6 +24,14 @@ function page<T extends { id: string }>(rows: T[], limit: number): Page<T> {
 }
 
 const cursorArgs = (limit: number, cursor?: string) => ({ take: limit + 1, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+
+export type Sort = 'createdAt' | '-createdAt' | 'amount' | '-amount';
+/** `-field` = descending; id breaks ties so cursor paging is stable under any sort. */
+function orderBy(sort: Sort = '-createdAt'): [{ createdAt: 'asc' | 'desc' } | { amount: 'asc' | 'desc' }, { id: 'asc' | 'desc' }] {
+  const dir = sort.startsWith('-') ? 'desc' : 'asc';
+  const field = sort.replace(/^-/, '') as 'createdAt' | 'amount';
+  return [field === 'amount' ? { amount: dir } : { createdAt: dir }, { id: dir }];
+}
 const HOUR = 60 * 60_000;
 
 /** Read models and operator actions behind /v1/admin. Every write is audited. */
@@ -46,8 +55,8 @@ export class AdminOpsService {
     return admin.departmentScoped ? { obligation: { payer: { department: { in: [...admin.departments] } } } } : {};
   }
 
-  async listPayments(admin: AdminPrincipal, q: { limit: number; cursor?: string; status?: string; channel?: string; feeType?: string; payerRef?: string; ref?: string; from?: string; to?: string }) {
-    const where: Prisma.PaymentWhereInput = {
+  paymentsWhere(admin: AdminPrincipal, q: PaymentFilters): Prisma.PaymentWhereInput {
+    return {
       AND: [
         this.paymentScope(admin),
         q.status ? { status: q.status as never } : {},
@@ -58,13 +67,43 @@ export class AdminOpsService {
         q.from || q.to ? { createdAt: { ...(q.from ? { gte: new Date(q.from) } : {}), ...(q.to ? { lt: new Date(q.to) } : {}) } } : {},
       ],
     };
+  }
+
+  async listPayments(admin: AdminPrincipal, q: PaymentFilters & { limit: number; cursor?: string; sort?: Sort }) {
     const rows = await this.prisma.payment.findMany({
-      where,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      where: this.paymentsWhere(admin, q),
+      orderBy: orderBy(q.sort),
       include: { obligation: { include: { payer: true, fee: { include: { feeType: true } } } }, receipt: true },
       ...cursorArgs(q.limit, q.cursor),
     });
     return page(rows.map(presentPayment), q.limit);
+  }
+
+  /**
+   * CSV of payments matching the list filters, oldest first, in batches (at most
+   * EXPORT_MAX_ROWS; narrow the filters beyond that). Audited.
+   */
+  async *exportPayments(admin: AdminPrincipal, q: PaymentFilters): AsyncGenerator<string> {
+    const where = this.paymentsWhere(admin, q);
+    const total = await this.prisma.payment.count({ where });
+    if (total > EXPORT_MAX_ROWS) {
+      throw new DomainError('VALIDATION', `${total} payments match; exports are limited to ${EXPORT_MAX_ROWS}. Narrow the date range or filters.`);
+    }
+    await this.audit.record({ actorId: admin.id, action: 'payments.export', entity: 'Payment', entityId: 'export', after: { filters: q, rows: total } });
+    yield `${CSV_COLUMNS.join(',')}\r\n`;
+    let cursor: string | undefined;
+    for (;;) {
+      const rows = await this.prisma.payment.findMany({
+        where,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        include: { obligation: { include: { payer: true, fee: { include: { feeType: true } } } }, receipt: true },
+        take: EXPORT_BATCH,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (rows.length) yield rows.map((r) => `${csvRow(r)}\r\n`).join('');
+      if (rows.length < EXPORT_BATCH) return;
+      cursor = rows[rows.length - 1]!.id;
+    }
   }
 
   async getPayment(admin: AdminPrincipal, id: string) {
@@ -104,11 +143,11 @@ export class AdminOpsService {
 
   // ── Payouts & transfers ────────────────────────────────────────────────────
 
-  async listPayouts(q: { limit: number; cursor?: string; status?: string }) {
+  async listPayouts(q: { limit: number; cursor?: string; status?: string; sort?: Sort }) {
     const rows = await this.prisma.payout.findMany({
       where: q.status ? { status: q.status as never } : {},
       include: { financialAccount: { select: { reference: true, monimeId: true } } },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: orderBy(q.sort),
       ...cursorArgs(q.limit, q.cursor),
     });
     return page(rows, q.limit);
@@ -120,13 +159,19 @@ export class AdminOpsService {
     return p;
   }
 
-  async listTransfers(q: { limit: number; cursor?: string; status?: string }) {
+  async listTransfers(q: { limit: number; cursor?: string; status?: string; sort?: Sort }) {
     const rows = await this.prisma.transfer.findMany({
       where: q.status ? { status: q.status as never } : {},
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: orderBy(q.sort),
       ...cursorArgs(q.limit, q.cursor),
     });
     return page(rows, q.limit);
+  }
+
+  async getTransfer(id: string) {
+    const t = await this.prisma.transfer.findUnique({ where: { id } });
+    if (!t) throw new DomainError('NOT_FOUND', 'Transfer not found');
+    return t;
   }
 
   /** FAILED commission transfer → new attempt (new Idempotency-Key) and send now. */
@@ -157,6 +202,12 @@ export class AdminOpsService {
     return page(rows, q.limit);
   }
 
+  async getOutbox(id: string) {
+    const m = await this.prisma.outboxMessage.findUnique({ where: { id } });
+    if (!m) throw new DomainError('NOT_FOUND', 'Outbox message not found');
+    return m;
+  }
+
   async retryOutbox(admin: AdminPrincipal, id: string) {
     const before = await this.prisma.outboxMessage.findUnique({ where: { id } });
     if (!before) throw new DomainError('NOT_FOUND', 'Outbox message not found');
@@ -174,27 +225,71 @@ export class AdminOpsService {
   /** Everything that needs a human: one call for the reconciliation screen. */
   async reconciliationSummary(now = new Date()) {
     const hourAgo = new Date(now.getTime() - HOUR);
-    const [openItems, webhookEvents, failedTransfers, stuckTransfers, stuckPayouts, failedPayouts, deadOutbox, staleOpenPayments] = await Promise.all([
-      this.prisma.reconciliationItem.findMany({ where: { status: 'OPEN' }, orderBy: { createdAt: 'desc' }, take: 200 }),
-      this.prisma.webhookEvent.findMany({ where: { status: { in: ['UNMATCHED', 'FAILED'] }, resolvedAt: null }, orderBy: { receivedAt: 'desc' }, take: 100 }),
-      this.prisma.transfer.findMany({ where: { status: 'FAILED' }, orderBy: { updatedAt: 'desc' }, take: 100 }),
-      this.prisma.transfer.findMany({ where: { status: { in: ['PENDING', 'SUBMITTED'] }, createdAt: { lt: hourAgo } }, take: 100 }),
-      this.prisma.payout.findMany({ where: { status: { in: ['REQUESTED', 'SUBMITTED', 'PROCESSING'] }, createdAt: { lt: hourAgo } }, take: 100 }),
-      this.prisma.payout.findMany({ where: { status: 'FAILED', updatedAt: { gt: new Date(now.getTime() - 7 * 24 * HOUR) } }, take: 100 }),
-      this.prisma.outboxMessage.findMany({ where: { status: 'DEAD' }, orderBy: { createdAt: 'desc' }, take: 100 }),
-      this.prisma.payment.findMany({ where: { status: { in: ['INITIATED', 'PENDING'] }, expiresAt: { lt: now } }, take: 100 }),
+    const w = {
+      openItems: { status: 'OPEN' } satisfies Prisma.ReconciliationItemWhereInput,
+      webhookEvents: { status: { in: ['UNMATCHED', 'FAILED'] }, resolvedAt: null } satisfies Prisma.WebhookEventWhereInput,
+      failedTransfers: { status: 'FAILED' } satisfies Prisma.TransferWhereInput,
+      stuckTransfers: { status: { in: ['PENDING', 'SUBMITTED'] }, createdAt: { lt: hourAgo } } satisfies Prisma.TransferWhereInput,
+      stuckPayouts: { status: { in: ['REQUESTED', 'SUBMITTED', 'PROCESSING'] }, createdAt: { lt: hourAgo } } satisfies Prisma.PayoutWhereInput,
+      failedPayouts: { status: 'FAILED', updatedAt: { gt: new Date(now.getTime() - 7 * 24 * HOUR) } } satisfies Prisma.PayoutWhereInput,
+      deadOutbox: { status: 'DEAD' } satisfies Prisma.OutboxMessageWhereInput,
+      staleOpenPayments: { status: { in: ['INITIATED', 'PENDING'] }, expiresAt: { lt: now } } satisfies Prisma.PaymentWhereInput,
+    };
+    // Lists show the latest SUMMARY_LIST_LIMIT of each; counts are exact.
+    const take = SUMMARY_LIST_LIMIT;
+    const [openItems, webhookEvents, failedTransfers, stuckTransfers, stuckPayouts, failedPayouts, deadOutbox, staleOpenPayments, counts] = await Promise.all([
+      this.prisma.reconciliationItem.findMany({ where: w.openItems, orderBy: { createdAt: 'desc' }, take }),
+      this.prisma.webhookEvent.findMany({ where: w.webhookEvents, orderBy: { receivedAt: 'desc' }, take, omit: { payload: true } }),
+      this.prisma.transfer.findMany({ where: w.failedTransfers, orderBy: { updatedAt: 'desc' }, take }),
+      this.prisma.transfer.findMany({ where: w.stuckTransfers, orderBy: { createdAt: 'asc' }, take }),
+      this.prisma.payout.findMany({ where: w.stuckPayouts, orderBy: { createdAt: 'asc' }, take }),
+      this.prisma.payout.findMany({ where: w.failedPayouts, orderBy: { updatedAt: 'desc' }, take }),
+      this.prisma.outboxMessage.findMany({ where: w.deadOutbox, orderBy: { createdAt: 'desc' }, take }),
+      this.prisma.payment.findMany({ where: w.staleOpenPayments, orderBy: { expiresAt: 'asc' }, take }),
+      Promise.all([
+        this.prisma.reconciliationItem.count({ where: w.openItems }),
+        this.prisma.webhookEvent.count({ where: w.webhookEvents }),
+        this.prisma.transfer.count({ where: w.failedTransfers }),
+        this.prisma.transfer.count({ where: w.stuckTransfers }),
+        this.prisma.payout.count({ where: w.stuckPayouts }),
+        this.prisma.payout.count({ where: w.failedPayouts }),
+        this.prisma.outboxMessage.count({ where: w.deadOutbox }),
+        this.prisma.payment.count({ where: w.staleOpenPayments }),
+      ]),
     ]);
+    const [cOpen, cEvents, cFailedT, cStuckT, cStuckP, cFailedP, cDead, cStale] = counts;
     return {
       lastRun: await this.prisma.reconciliationRun.findFirst({ orderBy: { startedAt: 'desc' } }),
       counts: {
-        openItems: openItems.length,
-        webhookEvents: webhookEvents.length, failedTransfers: failedTransfers.length, stuckTransfers: stuckTransfers.length,
-        stuckPayouts: stuckPayouts.length, failedPayouts: failedPayouts.length, deadOutbox: deadOutbox.length, staleOpenPayments: staleOpenPayments.length,
+        openItems: cOpen, webhookEvents: cEvents, failedTransfers: cFailedT, stuckTransfers: cStuckT,
+        stuckPayouts: cStuckP, failedPayouts: cFailedP, deadOutbox: cDead, staleOpenPayments: cStale,
       },
+      /** each list holds at most this many (the counts are exact) */
+      listLimit: take,
       openItems,
-      webhookEvents: webhookEvents.map(({ payload: _p, ...e }) => e),
+      webhookEvents,
       failedTransfers, stuckTransfers, stuckPayouts, failedPayouts, deadOutbox, staleOpenPayments,
     };
+  }
+
+  /** Without payloads; GET /webhook-events/:id has it. */
+  async listWebhookEvents(q: { limit: number; cursor?: string; status?: string; type?: string; unresolved?: boolean }) {
+    const rows = await this.prisma.webhookEvent.findMany({
+      where: { ...(q.status ? { status: q.status as never } : {}), ...(q.type ? { type: q.type } : {}), ...(q.unresolved ? { resolvedAt: null } : {}) },
+      omit: { payload: true },
+      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
+      ...cursorArgs(q.limit, q.cursor),
+    });
+    return page(rows, q.limit);
+  }
+
+  async listItems(q: { limit: number; cursor?: string; status?: string; runId?: string; kind?: string }) {
+    const rows = await this.prisma.reconciliationItem.findMany({
+      where: { ...(q.status ? { status: q.status as never } : {}), ...(q.runId ? { runId: q.runId } : {}), ...(q.kind ? { kind: q.kind } : {}) },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      ...cursorArgs(q.limit, q.cursor),
+    });
+    return page(rows, q.limit);
   }
 
   async getWebhookEvent(id: string) {
@@ -223,8 +318,12 @@ export class AdminOpsService {
     return ack;
   }
 
-  async listRuns(q: { limit: number; cursor?: string }) {
-    const rows = await this.prisma.reconciliationRun.findMany({ orderBy: [{ startedAt: 'desc' }, { id: 'desc' }], ...cursorArgs(q.limit, q.cursor) });
+  async listRuns(q: { limit: number; cursor?: string; status?: string }) {
+    const rows = await this.prisma.reconciliationRun.findMany({
+      where: q.status ? { status: q.status as never } : {},
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+      ...cursorArgs(q.limit, q.cursor),
+    });
     return page(rows, q.limit);
   }
 
@@ -266,6 +365,10 @@ export class AdminOpsService {
     return page(rows, q.limit);
   }
 }
+
+export const SUMMARY_LIST_LIMIT = 100;
+
+export interface PaymentFilters { status?: string; channel?: string; feeType?: string; payerRef?: string; ref?: string; from?: string; to?: string }
 
 type PaymentRow = Prisma.PaymentGetPayload<{ include: { obligation: { include: { payer: true; fee: { include: { feeType: true } } } }; receipt: true } }>;
 

@@ -5,6 +5,10 @@ import { PERMISSIONS } from '../../auth/domain/permissions';
 const ROLES = ['SUPER_ADMIN', 'BURSAR', 'FINANCE_OFFICER', 'HEAD_OF_DEPARTMENT', 'AUDITOR'] as const;
 const toDigits = ({ value }: { value: unknown }): unknown => (typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : value);
 
+/** Sort: a field, `-field` for descending. Ties break on id, so cursors stay stable. */
+export const SORTS = ['createdAt', '-createdAt', 'amount', '-amount'] as const;
+export type Sort = (typeof SORTS)[number];
+
 export class PageQuery {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200)
   limit = 50;
@@ -36,6 +40,33 @@ export class PaymentsQuery extends PageQuery {
 
   @IsOptional() @IsISO8601()
   to?: string;
+
+  @IsOptional() @IsIn(SORTS)
+  sort?: Sort;
+}
+
+/** Same filters as the list, no paging. */
+export class PaymentsExportQuery {
+  @IsOptional() @IsIn(['INITIATED', 'PENDING', 'COMPLETED', 'FAILED', 'EXPIRED'])
+  status?: 'INITIATED' | 'PENDING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
+
+  @IsOptional() @IsIn(['USSD', 'DOTS'])
+  channel?: 'USSD' | 'DOTS';
+
+  @IsOptional() @IsString() @Length(1, 20)
+  feeType?: string;
+
+  @IsOptional() @IsString() @Length(1, 64)
+  payerRef?: string;
+
+  @IsOptional() @IsString() @Length(1, 64)
+  ref?: string;
+
+  @IsOptional() @IsISO8601()
+  from?: string;
+
+  @IsOptional() @IsISO8601()
+  to?: string;
 }
 
 export class ReportsSummaryQueryDto {
@@ -54,9 +85,60 @@ export class ReportsSummaryQueryDto {
   channel?: 'USSD' | 'DOTS';
 }
 
-export class StatusQuery extends PageQuery {
-  @IsOptional() @IsString() @Length(1, 20)
-  status?: string;
+export class PayoutsQuery extends PageQuery {
+  @IsOptional() @IsIn(['REQUESTED', 'SUBMITTED', 'PROCESSING', 'COMPLETED', 'FAILED'])
+  status?: 'REQUESTED' | 'SUBMITTED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+  @IsOptional() @IsIn(SORTS)
+  sort?: Sort;
+}
+
+export class TransfersQuery extends PageQuery {
+  @IsOptional() @IsIn(['PENDING', 'SUBMITTED', 'COMPLETED', 'FAILED'])
+  status?: 'PENDING' | 'SUBMITTED' | 'COMPLETED' | 'FAILED';
+
+  @IsOptional() @IsIn(SORTS)
+  sort?: Sort;
+}
+
+export class OutboxQuery extends PageQuery {
+  @IsOptional() @IsIn(['PENDING', 'SENT', 'DEAD'])
+  status?: 'PENDING' | 'SENT' | 'DEAD';
+}
+
+export class RunsQuery extends PageQuery {
+  @IsOptional() @IsIn(['RUNNING', 'COMPLETED', 'FAILED'])
+  status?: 'RUNNING' | 'COMPLETED' | 'FAILED';
+}
+
+export class ItemsQuery extends PageQuery {
+  @IsOptional() @IsIn(['OPEN', 'AUTO_RESOLVED', 'RESOLVED'])
+  status?: 'OPEN' | 'AUTO_RESOLVED' | 'RESOLVED';
+
+  @IsOptional() @IsUUID()
+  runId?: string;
+
+  @IsOptional() @IsString() @Length(1, 50)
+  kind?: string;
+}
+
+/** Webhook event ids are Monime's (not UUIDs), so the cursor is any id. */
+export class WebhookEventsQuery {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200)
+  limit = 50;
+
+  @IsOptional() @IsString() @Length(1, 100)
+  cursor?: string;
+
+  @IsOptional() @IsIn(['RECEIVED', 'PROCESSED', 'IGNORED', 'UNMATCHED', 'FAILED'])
+  status?: 'RECEIVED' | 'PROCESSED' | 'IGNORED' | 'UNMATCHED' | 'FAILED';
+
+  @IsOptional() @IsString() @Length(1, 100)
+  type?: string;
+
+  /** true: only events nobody has resolved yet */
+  @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean()
+  unresolved?: boolean;
 }
 
 export class AuditQuery extends PageQuery {

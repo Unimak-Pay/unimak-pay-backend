@@ -29,7 +29,10 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
 - **Money:** amounts are **strings of SLE minor units** (1 SLE = 100), e.g. `"150000"` = SLE 1,500.00.
   - Never use JS floats for money. Use `BigInt` or string math for arithmetic, and one shared `formatSle(minor: string)` → `"SLE 1,500.00"`.
   - Money inputs: the user types major units (`1500` or `1,500.50`). Convert to a minor-unit string with string math and validate it as an integer > 0.
-- **Pagination:** cursor-based. Pass `?limit=` (≤ 200, default 50) and `&cursor=<nextCursor>`. Responses are `{ items, nextCursor }`, newest first. Build one reusable table with "Load more" or infinite scroll.
+- **Pagination and sorting:** cursor-based. Pass `?limit=` (≤ 200, default 50) and `&cursor=<nextCursor>`. Responses are `{ items, nextCursor }`, newest first by default. Build one reusable table with "Load more" or infinite scroll.
+  - Payments, payouts and transfers take `sort` = `createdAt | -createdAt | amount | -amount`. Column sorting on those tables must set `sort` and restart from the first page.
+  - Other tables sort only the rows already loaded; say so in the column header tooltip.
+  - Status filters accept only the enum values in the spec.
 - **Errors:** two shapes; handle both in one place.
   - Business errors: `{ error: { code, message, details } }`. Show `message`. Some codes are worth explaining in the UI:
     - `AMBIGUOUS_RATE_RULE`: the message names the tie-breaker rule to add first.
@@ -81,6 +84,7 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
 3. **Payments**:
    - list (`GET /v1/admin/payments`) with filters status, channel, feeType, payerRef, from/to, and a search box bound to `ref`. The search takes a paymentRef, a Monime order number or an `spm-…` id, whatever a payer or Monime support quotes;
    - detail (`GET /v1/admin/payments/{id}`): payer, fee, amounts and split, status timeline (created, expires, completed), Monime ids, receipt number, ledger entry, commission transfer;
+   - **Export CSV** (`GET /v1/admin/payments/export.csv` with the current filters, `payments.export`). Download it via the proxy (the response is a file, not JSON). A 400 says to narrow the filters (the limit is 50,000 rows).
    - action **"Check with Monime"** (`POST /v1/admin/payments/{id}/reconcile`, `payments.reconcile`) for open payments; it shows before → after.
 
 4. **Fee setup** (`fees.read` / `fees.manage` / `instalments.manage`):
@@ -103,16 +107,16 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
      - a **review-and-confirm step** that restates the amount in words and figures;
      - one `idempotencyKey` (UUID) generated when the form opens and reused on retries of the same submission; the button is disabled while submitting;
      - after submit, show the status, which arrives later from Monime (poll the detail).
-   - **Commission transfers:** list (`GET /v1/admin/transfers?status=`) and **Retry** for FAILED ones (`POST /{id}/retry`).
-   - **Outbox:** list (`GET /v1/admin/outbox?status=`) and **Retry** for DEAD ones (`POST /{id}/retry`).
+   - **Commission transfers:** list (`GET /v1/admin/transfers?status=&sort=`), detail (`GET /{id}`), and **Retry** for FAILED ones (`POST /{id}/retry`).
+   - **Outbox:** list (`GET /v1/admin/outbox?status=`), detail (`GET /{id}`), and **Retry** for DEAD ones (`POST /{id}/retry`).
 
 6. **Reconciliation** (`reconciliation.read` / `.manage`):
-   - the summary lists from `GET /v1/admin/reconciliation`;
-   - runs list (`GET /runs`), run detail with its items (`GET /runs/{id}`), and **"Reconcile a day"** (`POST /runs {date}`, default yesterday UTC);
-   - resolve an item (`POST /items/{id}/resolve {resolution}`, with a required note);
-   - webhook event viewer with the raw JSON payload (`GET /webhook-events/{id}`), plus **Resolve** (with a note) and **Replay**.
+   - the summary from `GET /v1/admin/reconciliation`: `counts` are exact, while each list holds at most `listLimit` rows, so link to the full lists below;
+   - runs list (`GET /runs?status=`), run detail with its items (`GET /runs/{id}`), and **"Reconcile a day"** (`POST /runs {date}`, default yesterday UTC);
+   - items across runs (`GET /items?status=&runId=&kind=`); resolve one (`POST /items/{id}/resolve {resolution}`, with a required note);
+   - webhook events list without payloads (`GET /webhook-events?status=&type=&unresolved=`; the cursor is the Monime event id), a viewer with the raw JSON payload (`GET /webhook-events/{id}`), plus **Resolve** (with a note) and **Replay** (FAILED only).
 
-7. **Users** (`users.manage`): list, invite (`POST /v1/admin/users`: email, name, role, extraPermissions, departments for HEAD_OF_DEPARTMENT), and edit/deactivate (`PATCH`).
+7. **Users** (`users.manage`): list, detail (`GET /v1/admin/users/{id}`), invite (`POST /v1/admin/users`: email, name, role, extraPermissions, departments for HEAD_OF_DEPARTMENT), and edit/deactivate (`PATCH`).
    - The server refuses granting what you don't have, deactivating yourself and removing the last super admin. Show its message.
 
 8. **Audit log** (`audit.read`): `GET /v1/admin/audit-log?entity=&entityId=&actorId=`, with before/after JSON diffs. Link to it from detail pages ("History"), filtered by `entity` and `entityId`.
@@ -138,7 +142,7 @@ UX: a desk tool for finance staff.
 
 ## Working style
 
-- **Plan first and wait for my OK.** Include the route map, components, data layer, auth flow, and a "Backend gaps" list (at least: CSV export for `payments.export`, CORS if we ever call the API from the browser).
+- **Plan first and wait for my OK.** Include the route map, components, data layer, auth flow, and a "Backend gaps" list (CORS, if we ever call the API from the browser; anything else you find missing).
 - Then work in small commits, one page or feature at a time, running type-check, lint and tests as you go.
 - Ask me before adding dependencies beyond the stack above.
 - Don't invent API fields or endpoints. Everything must exist in `openapi.yaml`. If something the UI needs is missing, add it to "Backend gaps" and ask.

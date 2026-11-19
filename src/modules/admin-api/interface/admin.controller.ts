@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Res, UseGuards, UseInterceptors } from '@nestjs/common';
+import type { Response } from 'express';
 import type { AdminPrincipal } from '../../auth/application/admin-principal';
 import { AdminAuthGuard, CurrentAdmin, RequirePermissions } from '../../auth/interface/admin-auth.guard';
 import { MONIME_CLIENT, type MonimeClient } from '../../integrations/monime/monime.port';
@@ -9,7 +10,8 @@ import { AdminReportsService } from '../application/admin-reports.service';
 import { AdminUsersService } from '../application/admin-users.service';
 import { BigIntJsonInterceptor } from './bigint-json.interceptor';
 import {
-  AuditQuery, CreateAdminUserDto, CreatePayoutDto, PaymentsQuery, ReportsSummaryQueryDto, RunReconciliationDto, ResolveEventDto, StatusQuery, UpdateAdminUserDto,
+  AuditQuery, CreateAdminUserDto, CreatePayoutDto, ItemsQuery, OutboxQuery, PaymentsExportQuery, PaymentsQuery, PayoutsQuery, ReportsSummaryQueryDto,
+  RunReconciliationDto, ResolveEventDto, RunsQuery, TransfersQuery, UpdateAdminUserDto, WebhookEventsQuery,
 } from './dto';
 
 /**
@@ -42,6 +44,12 @@ export class AdminController {
     return this.users.list();
   }
 
+  @Get('users/:id')
+  @RequirePermissions('users.manage')
+  getUser(@Param('id', ParseUUIDPipe) id: string) {
+    return this.users.get(id);
+  }
+
   @Post('users')
   @RequirePermissions('users.manage')
   createUser(@CurrentAdmin() admin: AdminPrincipal, @Body() dto: CreateAdminUserDto) {
@@ -69,6 +77,22 @@ export class AdminController {
   @RequirePermissions('payments.read')
   listPayments(@CurrentAdmin() admin: AdminPrincipal, @Query() q: PaymentsQuery) {
     return this.ops.listPayments(admin, q);
+  }
+
+  /** CSV (SLE amounts) of the payments matching the list filters; audited. Declared before payments/:id. */
+  @Get('payments/export.csv')
+  @RequirePermissions('payments.export')
+  async exportPayments(@CurrentAdmin() admin: AdminPrincipal, @Query() q: PaymentsExportQuery, @Res() res: Response): Promise<void> {
+    const rows = this.ops.exportPayments(admin, q);
+    const first = await rows.next(); // throws (→ JSON error) before any header is sent, e.g. too many rows
+    const day = new Date().toISOString().slice(0, 10);
+    res.status(200);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="unimak-payments-${day}.csv"`);
+    res.setHeader('Cache-Control', 'no-store');
+    if (!first.done) res.write(`\uFEFF${first.value}`); // BOM so Excel reads UTF-8
+    for await (const chunk of rows) res.write(chunk);
+    res.end();
   }
 
   @Get('payments/:id')
@@ -117,7 +141,7 @@ export class AdminController {
 
   @Get('payouts')
   @RequirePermissions('payouts.read')
-  listPayouts(@Query() q: StatusQuery) {
+  listPayouts(@Query() q: PayoutsQuery) {
     return this.ops.listPayouts(q);
   }
 
@@ -141,8 +165,14 @@ export class AdminController {
 
   @Get('transfers')
   @RequirePermissions('transfers.read')
-  listTransfers(@Query() q: StatusQuery) {
+  listTransfers(@Query() q: TransfersQuery) {
     return this.ops.listTransfers(q);
+  }
+
+  @Get('transfers/:id')
+  @RequirePermissions('transfers.read')
+  getTransfer(@Param('id', ParseUUIDPipe) id: string) {
+    return this.ops.getTransfer(id);
   }
 
   @Post('transfers/:id/retry')
@@ -162,7 +192,7 @@ export class AdminController {
 
   @Get('reconciliation/runs')
   @RequirePermissions('reconciliation.read')
-  runs(@Query() q: StatusQuery) {
+  runs(@Query() q: RunsQuery) {
     return this.ops.listRuns(q);
   }
 
@@ -180,11 +210,23 @@ export class AdminController {
     return this.ops.runReconciliation(admin, dto.date);
   }
 
+  @Get('reconciliation/items')
+  @RequirePermissions('reconciliation.read')
+  items(@Query() q: ItemsQuery) {
+    return this.ops.listItems(q);
+  }
+
   @Post('reconciliation/items/:id/resolve')
   @HttpCode(200)
   @RequirePermissions('reconciliation.manage')
   resolveItem(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ResolveEventDto) {
     return this.ops.resolveItem(admin, id, dto.resolution);
+  }
+
+  @Get('reconciliation/webhook-events')
+  @RequirePermissions('reconciliation.read')
+  webhookEvents(@Query() q: WebhookEventsQuery) {
+    return this.ops.listWebhookEvents(q);
   }
 
   @Get('reconciliation/webhook-events/:id')
@@ -209,8 +251,14 @@ export class AdminController {
 
   @Get('outbox')
   @RequirePermissions('outbox.read')
-  outbox(@Query() q: StatusQuery) {
+  outbox(@Query() q: OutboxQuery) {
     return this.ops.listOutbox(q);
+  }
+
+  @Get('outbox/:id')
+  @RequirePermissions('outbox.read')
+  getOutbox(@Param('id', ParseUUIDPipe) id: string) {
+    return this.ops.getOutbox(id);
   }
 
   @Post('outbox/:id/retry')

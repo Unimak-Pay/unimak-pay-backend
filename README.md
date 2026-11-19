@@ -145,9 +145,20 @@ code and close our payment through reconciliation (we don't subscribe to
 
 The full contract is in **[`openapi.yaml`](openapi.yaml)** (OpenAPI 3.1): every route,
 request schema, auth scheme and required admin permission (`x-permission`).
-`pnpm openapi:lint` validates it, `pnpm openapi:preview` serves rendered docs locally,
-and `test/e2e/openapi.e2e-spec.ts` fails if a route is added or removed without
-updating the spec.
+`pnpm openapi:lint` validates it, `pnpm openapi:preview` serves rendered docs locally.
+Three tests keep it honest:
+
+- `test/e2e/openapi.e2e-spec.ts`: every served route is documented, and nothing else.
+- `test/e2e/contract.e2e-spec.ts`: calls **every admin operation** and checks each
+  response against its schema (Ajv, JSON Schema 2020-12) **and** that it has no
+  undocumented property.
+- `test/unit/openapi-models.spec.ts`: the row schemas (`AdminUser`, `Payment`, `Payout`, …)
+  are generated from `prisma/schema.prisma` into a marked block. After a schema change
+  run `pnpm openapi:models`.
+
+Admin lists take `limit` (≤ 200) and `cursor` (`nextCursor`). Payments, payouts and
+transfers also take `sort` = `createdAt|-createdAt|amount|-amount`. Status filters
+accept only the documented enum values.
 
 There are four API surfaces, each with its own protection:
 

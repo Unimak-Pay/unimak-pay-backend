@@ -29,6 +29,12 @@ export class AdminUsersService {
     return this.prisma.adminUser.findMany({ orderBy: { email: 'asc' } });
   }
 
+  async get(id: string) {
+    const u = await this.prisma.adminUser.findUnique({ where: { id } });
+    if (!u) throw new DomainError('NOT_FOUND', 'Admin user not found');
+    return u;
+  }
+
   async create(actor: AdminPrincipal, input: { email: string; name?: string; role: AdminRole; extraPermissions?: string[]; departments?: string[] }) {
     const email = input.email.trim().toLowerCase();
     assertCanGrant(actor, input.role, input.extraPermissions ?? []);
