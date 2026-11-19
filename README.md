@@ -268,6 +268,7 @@ they don't hold, and only super admins manage super admins. Every write is recor
 | POST/PUT/DELETE | `/fees/:id/rate-rules[/:ruleId]` `{programCode?, department?, level?, residency?, intake?, amount}` — ties rejected; deleting a tie-breaker refused | `fees.manage` |
 | POST/DELETE | `/fees/:id/eligibility-rules[/:ruleId]` (same matchers + `finalYear?`) | `fees.manage` |
 | PUT/DELETE | `/fees/:id/instalment-rules/:programCode` `{minInstalment}` | `instalments.manage` |
+| GET | `/reports/summary?from=&to=&feeType=&channel=` — collected by day / fee type / channel, payment funnel, commission, payouts | `reports.read` |
 | GET | `/payments`, `/payments/:id` (filters: status, channel, feeType, payerRef, `ref` = payment ref / Monime order no. / spm-… id, from, to) | `payments.read` |
 | POST | `/payments/:id/reconcile` | `payments.reconcile` |
 | GET | `/financial-accounts`; POST `/financial-accounts/:id/refresh-balance` | `accounts.read` |

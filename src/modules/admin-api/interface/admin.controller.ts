@@ -5,10 +5,11 @@ import { MONIME_CLIENT, type MonimeClient } from '../../integrations/monime/moni
 import { ProvisionAccountsUseCase } from '../../treasury/application/provision-accounts.use-case';
 import { RequestPayoutUseCase } from '../../treasury/application/request-payout.use-case';
 import { AdminOpsService } from '../application/admin-ops.service';
+import { AdminReportsService } from '../application/admin-reports.service';
 import { AdminUsersService } from '../application/admin-users.service';
 import { BigIntJsonInterceptor } from './bigint-json.interceptor';
 import {
-  AuditQuery, CreateAdminUserDto, CreatePayoutDto, PaymentsQuery, RunReconciliationDto, ResolveEventDto, StatusQuery, UpdateAdminUserDto,
+  AuditQuery, CreateAdminUserDto, CreatePayoutDto, PaymentsQuery, ReportsSummaryQueryDto, RunReconciliationDto, ResolveEventDto, StatusQuery, UpdateAdminUserDto,
 } from './dto';
 
 /**
@@ -22,6 +23,7 @@ export class AdminController {
   constructor(
     private readonly ops: AdminOpsService,
     private readonly users: AdminUsersService,
+    private readonly reports: AdminReportsService,
     private readonly provision: ProvisionAccountsUseCase,
     private readonly payouts: RequestPayoutUseCase,
     @Inject(MONIME_CLIENT) private readonly monime: MonimeClient,
@@ -50,6 +52,15 @@ export class AdminController {
   @RequirePermissions('users.manage')
   updateUser(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAdminUserDto) {
     return this.users.update(admin, id, dto);
+  }
+
+  // ── Reports ────────────────────────────────────────────────────────────────
+
+  /** Collection totals: by day, fee type and channel; payment funnel; commission and payouts. */
+  @Get('reports/summary')
+  @RequirePermissions('reports.read')
+  reportsSummary(@CurrentAdmin() admin: AdminPrincipal, @Query() q: ReportsSummaryQueryDto) {
+    return this.reports.summary(admin, q);
   }
 
   // ── Payments ───────────────────────────────────────────────────────────────

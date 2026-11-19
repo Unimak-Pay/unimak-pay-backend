@@ -38,6 +38,22 @@ export class PaymentsQuery extends PageQuery {
   to?: string;
 }
 
+export class ReportsSummaryQueryDto {
+  /** YYYY-MM-DD inclusive (Africa/Freetown = UTC); default 29 days before `to` */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from?: string;
+
+  /** YYYY-MM-DD inclusive; default today */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to?: string;
+
+  @IsOptional() @IsString() @Length(1, 20)
+  feeType?: string;
+
+  @IsOptional() @IsIn(['USSD', 'DOTS'])
+  channel?: 'USSD' | 'DOTS';
+}
+
 export class StatusQuery extends PageQuery {
   @IsOptional() @IsString() @Length(1, 20)
   status?: string;

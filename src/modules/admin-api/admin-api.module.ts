@@ -8,6 +8,7 @@ import { ReconciliationModule } from '../reconciliation/reconciliation.module';
 import { TreasuryModule } from '../treasury/treasury.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { AdminCatalogService } from './application/admin-catalog.service';
+import { AdminReportsService } from './application/admin-reports.service';
 import { AdminOpsService } from './application/admin-ops.service';
 import { AdminUsersService } from './application/admin-users.service';
 import { AdminCatalogController } from './interface/admin-catalog.controller';
@@ -17,6 +18,6 @@ import { AdminController } from './interface/admin.controller';
 @Module({
   imports: [AuthModule, PaymentsModule, TreasuryModule, OutboxModule, WebhooksModule, ReconciliationModule, CatalogModule, PayersModule],
   controllers: [AdminController, AdminCatalogController],
-  providers: [AdminOpsService, AdminUsersService, AdminCatalogService],
+  providers: [AdminOpsService, AdminUsersService, AdminCatalogService, AdminReportsService],
 })
 export class AdminApiModule {}

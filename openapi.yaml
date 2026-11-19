@@ -40,6 +40,8 @@ security:
 tags:
   - name: Channel
     description: Dash Dots and other payment channels. HMAC-signed (`channelHmac`).
+  - name: Admin · Reports
+    description: Collection totals for the dashboard.
   - name: Admin · Payments
   - name: Admin · Fee setup
     description: Fee types (each with its own Monime financial account), fees and their rules.
@@ -467,6 +469,101 @@ paths:
         - { name: actorId, in: query, schema: { type: string, maxLength: 100 } }
       responses:
         '200': { $ref: '#/components/responses/Page' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ── Admin · reports ─────────────────────────────────────────────────────────
+  /v1/admin/reports/summary:
+    get:
+      tags: [Admin · Reports]
+      operationId: adminReportsSummary
+      summary: Collection totals by day, fee type and channel; payment funnel; commission and payouts
+      description: |
+        - **collected**: COMPLETED payments by `completedAt` in the range (a late settlement counts on
+          the day Monime completed it). `monimeFees + platformFees + net = amount`.
+        - **byDay**: every day of the range, zero-filled. Days are UTC (= Africa/Freetown).
+        - **payments**: the funnel of payments *started* in the range, by current status. An open
+          payment past expiry counts as expired.
+        - **commission** / **payouts**: transfers / payouts created in the range. They are `null` unless
+          the admin has `transfers.read` / `payouts.read`, and always `null` for heads of department.
+        - Heads of department only see their departments' payments (`filters.departments`).
+      x-permission: reports.read
+      security: [{ adminJwt: [] }]
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date }, description: 'Inclusive. Default: 29 days before `to`.' }
+        - { name: to, in: query, schema: { type: string, format: date }, description: 'Inclusive. Default: today. At most 366 days in all.' }
+        - { name: feeType, in: query, schema: { type: string, maxLength: 20 }, example: TUITION }
+        - { name: channel, in: query, schema: { $ref: '#/components/schemas/Channel' } }
+      responses:
+        '200':
+          description: Summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  range:
+                    type: object
+                    properties:
+                      from: { type: string, format: date }
+                      to: { type: string, format: date }
+                      days: { type: integer }
+                      timezone: { type: string, example: Africa/Freetown (UTC) }
+                  filters:
+                    type: object
+                    properties:
+                      feeType: { type: [string, 'null'] }
+                      channel: { oneOf: [{ $ref: '#/components/schemas/Channel' }, { type: 'null' }] }
+                      departments: { type: [array, 'null'], items: { type: string } }
+                  collected:
+                    type: object
+                    properties:
+                      amount: { type: string, description: 'SLE minor units' }
+                      count: { type: integer }
+                      average: { type: string, description: 'SLE minor units' }
+                      monimeFees: { type: string, description: 'SLE minor units' }
+                      platformFees: { type: string, description: 'SLE minor units' }
+                      net: { type: string, description: 'SLE minor units' }
+                      lateSettlements: { type: integer, description: 'Completed after their hold expired.' }
+                  byDay:
+                    type: array
+                    items: { type: object, properties: { date: { type: string, format: date }, amount: { type: string, description: 'SLE minor units' }, count: { type: integer } } }
+                  byFeeType:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        feeTypeCode: { type: string }
+                        feeTypeName: { type: string }
+                        amount: { type: string, description: 'SLE minor units' }
+                        count: { type: integer }
+                        platformFees: { type: string, description: 'SLE minor units' }
+                        net: { type: string, description: 'SLE minor units' }
+                  byChannel:
+                    type: array
+                    items: { type: object, properties: { channel: { $ref: '#/components/schemas/Channel' }, amount: { type: string, description: 'SLE minor units' }, count: { type: integer } } }
+                  payments:
+                    type: object
+                    properties:
+                      started: { type: integer }
+                      completed: { $ref: '#/components/schemas/CountAmount' }
+                      pending: { $ref: '#/components/schemas/CountAmount' }
+                      failed: { $ref: '#/components/schemas/CountAmount' }
+                      expired: { $ref: '#/components/schemas/CountAmount' }
+                      completionRate: { type: [number, 'null'], minimum: 0, maximum: 1 }
+                  commission:
+                    type: [object, 'null']
+                    properties:
+                      transferred: { $ref: '#/components/schemas/CountAmount' }
+                      inFlight: { $ref: '#/components/schemas/CountAmount' }
+                      failed: { $ref: '#/components/schemas/CountAmount' }
+                  payouts:
+                    type: [object, 'null']
+                    properties:
+                      paidOut: { $ref: '#/components/schemas/CountAmount' }
+                      inFlight: { $ref: '#/components/schemas/CountAmount' }
+                      failed: { $ref: '#/components/schemas/CountAmount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -1304,6 +1401,11 @@ components:
       type: string
       enum: [fees.read, fees.manage, instalments.manage, payers.read, payers.adjust, payments.read, payments.export, payments.refund, payments.reconcile, receipts.resend, accounts.read, accounts.manage, payouts.read, payouts.manage, transfers.read, transfers.retry, reconciliation.read, reconciliation.manage, outbox.read, outbox.retry, reports.read, audit.read, users.manage, settings.manage]
 
+    CountAmount:
+      type: object
+      properties:
+        count: { type: integer }
+        amount: { type: string, description: 'SLE minor units' }
     Error:
       type: object
       required: [error]

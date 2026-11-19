@@ -70,7 +70,13 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
    - needs-attention counts from `GET /v1/admin/reconciliation` (`counts`: openItems, webhookEvents, failedTransfers, stuckTransfers, stuckPayouts, failedPayouts, deadOutbox, staleOpenPayments, plus `lastRun`), each linking to its list;
    - account balances from `GET /v1/admin/financial-accounts`;
    - the latest payments from `GET /v1/admin/payments?limit=10`.
-   - **There is no aggregate/reporting endpoint yet** (totals per day / fee type / channel). Don't compute totals by paging through every payment. Put a clearly marked placeholder card and list it under "Backend gaps" in your plan.
+   - **Collections** from `GET /v1/admin/reports/summary?from=&to=&feeType=&channel=` (`reports.read`), with a date-range picker (default last 30 days, at most 366) and fee type / channel filters kept in the URL. It shows:
+     - KPI cards from `collected` (amount, count, average, net after fees, platform commission, late settlements);
+     - a daily collections chart from `byDay`, which is already zero-filled;
+     - breakdowns from `byFeeType` and `byChannel`;
+     - the payment funnel from `payments` (started → completed / pending / failed / expired, `completionRate`);
+     - commission (`commission`) and payouts (`payouts`), each shown only when not `null`.
+   - Never compute totals by paging through payments.
 
 3. **Payments**:
    - list (`GET /v1/admin/payments`) with filters status, channel, feeType, payerRef, from/to, and a search box bound to `ref`. The search takes a paymentRef, a Monime order number or an `spm-…` id, whatever a payer or Monime support quotes;
@@ -132,7 +138,7 @@ UX: a desk tool for finance staff.
 
 ## Working style
 
-- **Plan first and wait for my OK.** Include the route map, components, data layer, auth flow, and a "Backend gaps" list (at least: aggregate reports, CSV export for `payments.export`, CORS if we ever call the API from the browser).
+- **Plan first and wait for my OK.** Include the route map, components, data layer, auth flow, and a "Backend gaps" list (at least: CSV export for `payments.export`, CORS if we ever call the API from the browser).
 - Then work in small commits, one page or feature at a time, running type-check, lint and tests as you go.
 - Ask me before adding dependencies beyond the stack above.
 - Don't invent API fields or endpoints. Everything must exist in `openapi.yaml`. If something the UI needs is missing, add it to "Backend gaps" and ask.
