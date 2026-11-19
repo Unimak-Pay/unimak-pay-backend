@@ -30,6 +30,7 @@
     "monime:register-webhook": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/register-webhook.js",
     "monime:payout": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/payout.js",
     "admin:create": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/admin-create.js",
+    "admin:login": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env --env-file-if-exists=.env.production.local dist/src/cli/admin-login.js",
     "ussd:flow": "tsc -p tsconfig.build.json && node --env-file-if-exists=.env dist/src/cli/ussd-flow.js"
   },
   "prisma": {

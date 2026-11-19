@@ -95,6 +95,7 @@ payer ──USSD payment code──▶ fee-type account (unimak-fee-app, -tuitio
 | Command | |
 |---|---|
 | `pnpm admin:create --email … --role SUPER_ADMIN` | invite an admin (bootstrap) |
+| `pnpm admin:login` | sign in as an admin from the terminal (password + 2FA) → access token |
 | `pnpm ussd:flow https://<domain>` | render the USSD flow JSON for the Monime dashboard |
 | `pnpm monime:provision` | create/link financial accounts (safe to re-run) |
 | `pnpm monime:balances` | refresh and print available balances |
@@ -287,6 +288,20 @@ string of minor units. Errors: 401 `UNAUTHENTICATED`, 403 `FORBIDDEN` / `MFA_REQ
 Bootstrap the first admin: `pnpm admin:create --email you@unimak.edu.sl --role SUPER_ADMIN`,
 then sign in to the portal with that email. In Supabase: disable public sign-ups (or rely
 on the invite-only check), enable the email and OAuth providers you want, and enable TOTP MFA.
+
+**Without the portal** — `pnpm admin:login` signs in from the terminal: email, password
+(hidden), and the authenticator code. On the first sign-in it enrols TOTP (secret,
+`otpauth://` link and a QR file that is deleted afterwards). It checks the token against
+`/v1/admin/me`, which also binds the invitation, and prints only the token on stdout:
+
+```bash
+TOKEN=$(pnpm -s admin:login)            # --email you@… to skip the prompt, --json for refresh token
+curl -H "authorization: Bearer $TOKEN" https://unimak-pay-backend.vercel.app/v1/admin/me
+```
+
+It reads `SUPABASE_URL`, `SUPABASE_ANON_KEY` (the publishable key from Project Settings →
+API Keys; not a secret) and `API_URL`/`PUBLIC_BASE_URL` from `.env` and
+`.env.production.local`. Tokens last about an hour.
 
 ### Channel API — `/v1/channel` (Dash Dots)
 
