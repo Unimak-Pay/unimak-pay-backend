@@ -109,6 +109,20 @@ export class EnvSchema {
   @IsOptional()
   SUPABASE_JWT_SECRET?: string;
 
+  /**
+   * Server-only key (service_role, or sb_secret_…) for the Supabase Auth admin API:
+   * POST /v1/admin/users then makes Supabase email the invitee. Never expose it to a browser.
+   */
+  @IsString()
+  @MinLength(20)
+  @IsOptional()
+  SUPABASE_SERVICE_ROLE_KEY?: string;
+
+  /** Dashboard page invite links open (where the invitee sets a password); must be in Supabase → Auth → Redirect URLs. Default: the Site URL. */
+  @IsUrl({ require_tld: false, require_protocol: true })
+  @IsOptional()
+  ADMIN_INVITE_REDIRECT_URL?: string;
+
   /** Static JWKS JSON ({"keys":[...]}) instead of fetching — tests / offline. */
   @IsString()
   @IsOptional()

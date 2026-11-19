@@ -132,6 +132,7 @@ describe('admin API responses match openapi.yaml', () => {
     const created = conforms('post', '/v1/admin/users', await as('post', '/v1/admin/users', { email: `fo-${randomUUID().slice(0, 6)}@unimak.test`, role: 'FINANCE_OFFICER', name: 'FO' }).expect(201));
     conforms('get', '/v1/admin/users', await as('get', '/v1/admin/users').expect(200));
     conforms('get', '/v1/admin/users/{id}', await as('get', `/v1/admin/users/${created.id}`).expect(200));
+    conforms('post', '/v1/admin/users/{id}/invite', await as('post', `/v1/admin/users/${created.id}/invite`).expect(200));
     conforms('patch', '/v1/admin/users/{id}', await as('patch', `/v1/admin/users/${created.id}`, { active: false }).expect(200));
     conforms('get', '/v1/admin/audit-log', await as('get', '/v1/admin/audit-log?limit=5').expect(200));
   });

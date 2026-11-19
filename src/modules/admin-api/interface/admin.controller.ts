@@ -56,6 +56,14 @@ export class AdminController {
     return this.users.create(admin, dto);
   }
 
+  /** Re-sends the Supabase invite email (only before their first sign-in). */
+  @Post('users/:id/invite')
+  @HttpCode(200)
+  @RequirePermissions('users.manage')
+  resendInvite(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string) {
+    return this.users.resendInvite(admin, id);
+  }
+
   @Patch('users/:id')
   @RequirePermissions('users.manage')
   updateUser(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAdminUserDto) {

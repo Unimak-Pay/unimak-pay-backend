@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import type { AdminRole } from '@prisma/client';
 import { DomainError } from '../../../shared/domain/errors';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import type { AdminPrincipal } from '../../auth/application/admin-principal';
+import { AUTH_INVITER, type AuthInviter, type InviteOutcome } from '../../auth/application/auth-inviter.port';
 import { effectivePermissions } from '../../auth/domain/permissions';
 
 /** No privilege escalation: only super admins touch super admins, others grant only what they hold. */
@@ -15,14 +16,16 @@ function assertCanGrant(actor: AdminPrincipal, role: AdminRole, extra: readonly 
 }
 
 /**
- * Invitations: create the AdminUser here, then the person signs in to the admin
- * portal with Supabase Auth (email + password or OAuth) using that email.
+ * Invitations: create the AdminUser here and ask Supabase Auth to email the
+ * person an invite link (they set a password, or sign in with OAuth using that
+ * email). The first sign-in binds the AdminUser to their Supabase user.
  */
 @Injectable()
 export class AdminUsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    @Inject(AUTH_INVITER) private readonly inviter: AuthInviter,
   ) {}
 
   list() {
@@ -42,13 +45,30 @@ export class AdminUsersService {
       throw new DomainError('VALIDATION', 'A head of department needs at least one department');
     }
     if (await this.prisma.adminUser.findUnique({ where: { email } })) throw new DomainError('INVALID_STATE', `${email} is already an admin`);
-    return this.prisma.$transaction(async (tx) => {
-      const user = await tx.adminUser.create({
+    const user = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.adminUser.create({
         data: { email, name: input.name ?? null, role: input.role, extraPermissions: input.extraPermissions ?? [], departments: input.departments ?? [], createdBy: actor.id },
       });
-      await this.audit.record({ actorId: actor.id, action: 'admin_user.create', entity: 'AdminUser', entityId: user.id, after: user }, tx);
-      return user;
+      await this.audit.record({ actorId: actor.id, action: 'admin_user.create', entity: 'AdminUser', entityId: created.id, after: created }, tx);
+      return created;
     });
+    // After the commit: a failed email never loses the invitation (re-send with POST users/:id/invite).
+    return { ...user, invitation: await this.sendInvite(actor, user.id, email) };
+  }
+
+  /** Re-sends the Supabase invite email to someone who hasn't signed in yet. */
+  async resendInvite(actor: AdminPrincipal, id: string) {
+    const user = await this.get(id);
+    if (user.authUserId) throw new DomainError('INVALID_STATE', 'This admin has already signed in; they can use "Forgot password"');
+    if (!user.active) throw new DomainError('INVALID_STATE', 'This admin is deactivated');
+    assertCanGrant(actor, user.role, user.extraPermissions, user.role);
+    return { ...user, invitation: await this.sendInvite(actor, user.id, user.email) };
+  }
+
+  private async sendInvite(actor: AdminPrincipal, id: string, email: string): Promise<InviteOutcome> {
+    const outcome = await this.inviter.invite(email);
+    await this.audit.record({ actorId: actor.id, action: 'admin_user.invite', entity: 'AdminUser', entityId: id, after: outcome });
+    return outcome;
   }
 
   async update(actor: AdminPrincipal, id: string, patch: { name?: string; role?: AdminRole; extraPermissions?: string[]; departments?: string[]; active?: boolean }) {

@@ -301,6 +301,16 @@ Bootstrap the first admin: `pnpm admin:create --email you@unimak.edu.sl --role S
 then sign in to the portal with that email. In Supabase: disable public sign-ups (or rely
 on the invite-only check), enable the email and OAuth providers you want, and enable TOTP MFA.
 
+**Invite emails.** With `SUPABASE_SERVICE_ROLE_KEY` set (server-only; Project Settings → API
+Keys → `service_role` or a secret key), `POST /v1/admin/users` also asks Supabase Auth to email
+the person an invite link (Authentication → Emails → "Invite user" template). The link opens
+`ADMIN_INVITE_REDIRECT_URL` (add it under Authentication → URL Configuration → Redirect URLs;
+default: the Site URL), where the dashboard lets them set a password. The response's
+`invitation.status` is `SENT`, `ALREADY_REGISTERED`, `NOT_CONFIGURED` or `FAILED`; the admin is
+created either way and `POST /v1/admin/users/{id}/invite` re-sends until their first sign-in.
+Supabase's built-in mailer only delivers to your Supabase team's addresses and a few per hour,
+so set up custom SMTP (Authentication → Emails → SMTP Settings) before inviting staff.
+
 **Without the portal** — `pnpm admin:login` signs in from the terminal: email, password
 (hidden), and the authenticator code. On the first sign-in it enrols TOTP (secret,
 `otpauth://` link and a QR file that is deleted afterwards). It checks the token against

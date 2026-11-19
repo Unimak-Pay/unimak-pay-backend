@@ -3,6 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { createApp } from '../../src/bootstrap';
+import { AUTH_INVITER, type AuthInviter } from '../../src/modules/auth/application/auth-inviter.port';
 import { ProvisionAccountsUseCase } from '../../src/modules/treasury/application/provision-accounts.use-case';
 import { adminToken, channel, monimeEvent } from './helpers';
 
@@ -141,6 +142,38 @@ describe('admin users', () => {
     const manager = await admin('FINANCE_OFFICER', { extra: ['users.manage'] });
     const last = await http.patch(`/v1/admin/users/${me.body.id}`).set('authorization', `Bearer ${manager.token}`).send({ active: false }).expect(409);
     expect(last.body.error.message).toBe('At least one active super admin must remain');
+  });
+
+  it('asks Supabase to email the invite; the admin exists even if that fails; re-send until first sign-in', async () => {
+    const s = await admin('SUPER_ADMIN');
+    // test env has no service role key
+    const plain = await post('/v1/admin/users', s.token, { email: `nokey-${randomUUID().slice(0, 6)}@unimak.test`, role: 'AUDITOR' }).expect(201);
+    expect(plain.body.invitation).toEqual({ status: 'NOT_CONFIGURED', message: expect.stringMatching(/SUPABASE_SERVICE_ROLE_KEY/) });
+
+    const inviter = app.get<AuthInviter>(AUTH_INVITER);
+    const spy = jest.spyOn(inviter, 'invite').mockResolvedValueOnce({ status: 'FAILED', message: 'Supabase email rate limit reached' });
+    try {
+      const email = `invitee-${randomUUID().slice(0, 6)}@unimak.test`;
+      const created = await post('/v1/admin/users', s.token, { email: email.toUpperCase(), role: 'FINANCE_OFFICER' }).expect(201);
+      expect(spy).toHaveBeenLastCalledWith(email);
+      expect(created.body).toMatchObject({ email, authUserId: null, invitation: { status: 'FAILED' } });
+      expect(await prisma.adminUser.count({ where: { email } })).toBe(1);
+
+      spy.mockResolvedValueOnce({ status: 'SENT' });
+      const resent = await post(`/v1/admin/users/${created.body.id}/invite`, s.token, {}).expect(200);
+      expect(resent.body.invitation).toEqual({ status: 'SENT' });
+      const audits = await prisma.auditLog.findMany({ where: { action: 'admin_user.invite', entityId: created.body.id }, orderBy: { at: 'asc' } });
+      expect(audits.map((a) => (a.after as { status: string }).status)).toEqual(['FAILED', 'SENT']);
+
+      // once they've signed in, there is nothing to re-send
+      const token = adminToken({ sub: randomUUID(), email, aal: 'aal2' });
+      await get('/v1/admin/me', token).expect(200);
+      const bound = await post(`/v1/admin/users/${created.body.id}/invite`, s.token, {}).expect(409);
+      expect(bound.body.error.message).toMatch(/already signed in/);
+      expect(spy).toHaveBeenCalledTimes(2);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('users.manage holders cannot escalate privileges', async () => {

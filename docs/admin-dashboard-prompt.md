@@ -14,12 +14,13 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
 - Only consume the **Admin API** (`/v1/admin/*`). The channel API, USSD exchange, webhook, cron and dev routes are not for the dashboard.
 - **Auth.** Admins sign in with **Supabase Auth**, which this app talks to directly. The backend only verifies the resulting access token: `Authorization: Bearer <supabase access_token>`.
   - Sign-in methods: email + password, plus OAuth providers if enabled. There is no sign-up screen: admins are invite-only (created by a super admin through `POST /v1/admin/users`).
+  - **Accept-invite page** (`/auth/accept-invite`, the backend's `ADMIN_INVITE_REDIRECT_URL`). Supabase emails invitees a link that lands here signed in, with `type=invite` (tokens in the URL fragment; supabase-js picks them up with `detectSessionInUrl`). Show a "Choose your password" form → `auth.updateUser({ password })`, then continue to the 2FA step (if their role needs it) and the app. Handle an expired or used link (`error_code=otp_expired` in the fragment): "This invite link has expired. Ask a super admin to re-send it." Also add a "Forgot password" link on sign-in (`auth.resetPasswordForEmail` with a redirect to a reset page that also calls `updateUser`).
   - **2FA (TOTP) is mandatory for `SUPER_ADMIN` and `BURSAR`.** For these roles the backend rejects tokens that aren't `aal2`, with `403 MFA_REQUIRED`.
     - Flow with `@supabase/supabase-js`: `auth.signInWithPassword` → `auth.mfa.listFactors()`.
     - First time: `auth.mfa.enroll({ factorType: 'totp' })`, show the QR code and the secret, then `challengeAndVerify`.
     - Every later sign-in: `challengeAndVerify` with the 6-digit code.
     - Use `auth.mfa.getAuthenticatorAssuranceLevel()` to route the user to the code step.
-  - After sign-in call `GET /v1/admin/me`. It returns `{ id, email, name, role, departments, permissions }`, and the first call also binds the invitation.
+  - After sign-in call `GET /v1/admin/me`. It returns `{ id, email, role, permissions, departments, departmentScoped, aal }`, and the first call also binds the invitation.
     - `403 FORBIDDEN` "Not an active UNIMAK admin": show "Your account is not an admin. Ask a super admin to invite you." and sign out.
   - Token refresh: let supabase-js handle it. Retry a request once after a 401 with a refreshed session.
 - **CORS: the backend sends no CORS headers.** The browser must **not** call the backend directly. Add a server-side proxy route, e.g. Next.js `app/api/unimak/[...path]/route.ts`:
@@ -117,6 +118,8 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
    - webhook events list without payloads (`GET /webhook-events?status=&type=&unresolved=`; the cursor is the Monime event id), a viewer with the raw JSON payload (`GET /webhook-events/{id}`), plus **Resolve** (with a note) and **Replay** (FAILED only).
 
 7. **Users** (`users.manage`): list, detail (`GET /v1/admin/users/{id}`), invite (`POST /v1/admin/users`: email, name, role, extraPermissions, departments for HEAD_OF_DEPARTMENT), and edit/deactivate (`PATCH`).
+   - After inviting, show `invitation.status`: `SENT` "Invite email sent to …"; `ALREADY_REGISTERED` "They already have a sign-in and can sign in now"; `NOT_CONFIGURED` / `FAILED` show `invitation.message` as a warning (the admin was still created).
+   - Users with `authUserId: null` are "Invited — not signed in yet": offer "Re-send invite" (`POST /v1/admin/users/{id}/invite`; 409 once they've signed in).
    - The server refuses granting what you don't have, deactivating yourself and removing the last super admin. Show its message.
 
 8. **Audit log** (`audit.read`): `GET /v1/admin/audit-log?entity=&entityId=&actorId=`, with before/after JSON diffs. Link to it from detail pages ("History"), filtered by `entity` and `entityId`.
