@@ -90,6 +90,11 @@ export class EligibilityRuleDto extends MatchersDto {
   @IsOptional() @IsBoolean() finalYear?: boolean | null;
 }
 
+/** `?level=` on instalment-rule routes: omitted = every level of the department. */
+export class InstalmentLevelQuery {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10) level?: number;
+}
+
 export class InstalmentRuleDto {
   @Transform(toDigits) @Matches(AMOUNT)
   minInstalment!: string;

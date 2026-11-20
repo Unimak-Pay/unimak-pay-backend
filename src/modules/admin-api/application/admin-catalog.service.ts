@@ -9,6 +9,7 @@ import type { AdminPrincipal } from '../../auth/application/admin-principal';
 import { SaveRateRuleUseCase } from '../../catalog/application/save-rate-rule.use-case';
 import { SetInstalmentRuleUseCase } from '../../catalog/application/set-instalment-rule.use-case';
 import { isEligible } from '../../catalog/domain/eligibility';
+import { pickInstalmentRule } from '../../catalog/domain/instalments';
 import type { Matchers } from '../../catalog/domain/matchers';
 import type { PayerKind } from '../../catalog/domain/payer-profile';
 import { findRateRuleConflicts, resolveRate } from '../../catalog/domain/rate-rule';
@@ -20,7 +21,7 @@ const feeInclude = {
   feeType: { include: { account: true } },
   rateRules: { orderBy: [{ programCode: 'asc' }, { level: 'asc' }, { residency: 'asc' }] },
   eligibilityRules: true,
-  instalmentRules: { orderBy: { department: 'asc' } },
+  instalmentRules: { orderBy: [{ department: 'asc' }, { level: { sort: 'asc', nulls: 'first' } }] },
   _count: { select: { obligations: true } },
 } satisfies Prisma.FeeInclude;
 
@@ -198,17 +199,18 @@ export class AdminCatalogService {
 
   // ── Minimum instalments (instalments.manage) ───────────────────────────────
 
-  async setInstalmentRule(admin: AdminPrincipal, feeId: string, department: string, minInstalment: Minor) {
+  /** level null = every level of the department. */
+  async setInstalmentRule(admin: AdminPrincipal, feeId: string, department: string, level: number | null, minInstalment: Minor) {
     await this.academics.assertUsableDepartments([department]);
-    const before = await this.prisma.instalmentRule.findUnique({ where: { feeId_department: { feeId, department } } });
-    await this.setInstalment.execute({ id: admin.id, permissions: [...admin.permissions] }, { feeId, department, minInstalment });
-    const after = await this.prisma.instalmentRule.findUniqueOrThrow({ where: { feeId_department: { feeId, department } } });
+    const before = await this.prisma.instalmentRule.findFirst({ where: { feeId, department, level } });
+    await this.setInstalment.execute({ id: admin.id, permissions: [...admin.permissions] }, { feeId, department, level, minInstalment });
+    const after = await this.prisma.instalmentRule.findFirstOrThrow({ where: { feeId, department, level } });
     await this.audit.record({ actorId: admin.id, action: 'instalment_rule.set', entity: 'InstalmentRule', entityId: after.id, before, after });
     return after;
   }
 
-  async deleteInstalmentRule(admin: AdminPrincipal, feeId: string, department: string) {
-    const before = await this.prisma.instalmentRule.findUnique({ where: { feeId_department: { feeId, department } } });
+  async deleteInstalmentRule(admin: AdminPrincipal, feeId: string, department: string, level: number | null) {
+    const before = await this.prisma.instalmentRule.findFirst({ where: { feeId, department, level } });
     if (!before) throw new DomainError('NOT_FOUND', 'Instalment rule not found');
     await this.prisma.$transaction(async (tx) => {
       await tx.instalmentRule.delete({ where: { id: before.id } });
@@ -233,7 +235,7 @@ export class AdminCatalogService {
     } catch {
       ambiguous = true;
     }
-    const instalment = fee.allowInstalments ? fee.instalmentRules.find((r) => r.department === payer.department) : undefined;
+    const instalment = fee.allowInstalments ? pickInstalmentRule(fee.instalmentRules, payer.department, payer.level) : null;
     return {
       payer: { kind, ref, programCode: payer.programCode, department: payer.department, level: payer.level, residency: payer.residency, intake: payer.intake, finalYear: payer.finalYear },
       fee: { id: fee.id, name: fee.name, status: fee.status, feeType: fee.feeType.code },

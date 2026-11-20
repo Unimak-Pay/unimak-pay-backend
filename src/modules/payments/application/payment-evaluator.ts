@@ -29,7 +29,7 @@ export class PaymentEvaluator {
     const l = (await this.ledger.ledgersFor([o.id], db)).get(o.id)!;
     const position = computePosition(o.amount, l.entries, l.pending, now);
     const ruleMin = o.allowInstalments
-      ? await this.catalog.instalmentRuleMin(o.feeId, o.department, db)
+      ? await this.catalog.instalmentRuleMin(o.feeId, o.department, o.level, db)
       : null;
     const min = minInstalment(
       { allowInstalments: o.allowInstalments, defaultMinInstalment: o.defaultMinInstalment, ruleMinInstalment: ruleMin },

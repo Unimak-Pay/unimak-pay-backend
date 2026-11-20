@@ -51,7 +51,7 @@ The core idea: a **fee** says what is charged and to whom, a **rate rule** says 
 - `RateRule`: matches on any of program, department, level, residency (local or international) and intake, then gives an amount. The most specific match wins, and ties are rejected when the admin saves. Example: Tuition 2026/27, BSc Nursing, Year 2, International = SLE X.
 - `EligibilityRule`: who owes the fee, e.g. new intake 2026, level = final year, department = Mass Comm. It uses the same attributes as rate rules.
 
-**Minimum instalment per program.** An `InstalmentRule` (fee × program → minimum amount) overrides the fee's default minimum. Only users with the `instalments.manage` permission can change it, and every change is written to the audit log.
+**Minimum instalment per department, optionally per level** (owner decisions, 2026-11-20). An `InstalmentRule` (fee × department × optional level → minimum amount) overrides the fee's default minimum. A student's own level rule wins over the department's all-levels rule; applicants (no level) get the all-levels rule. Only users with the `instalments.manage` permission can change it, and every change is written to the audit log.
 
 **Application fee rule.** The application fee is payable once per application ref, before admission, and it stands whatever the admission outcome. Once it's paid, every channel shows it as Paid and refuses a second payment. Our notify call is what tells the portal it can process the application.
 

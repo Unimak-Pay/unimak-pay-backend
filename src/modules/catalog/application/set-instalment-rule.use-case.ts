@@ -15,10 +15,13 @@ export class SetInstalmentRuleUseCase {
 
   async execute(
     actor: Actor,
-    input: { feeId: string; department: string; minInstalment: Minor },
+    input: { feeId: string; department: string; level: number | null; minInstalment: Minor },
   ): Promise<void> {
     assertCanManageInstalments(actor.permissions);
     if (input.minInstalment <= 0n) throw new DomainError('VALIDATION', 'Must be positive');
+    if (input.level !== null && (!Number.isInteger(input.level) || input.level < 1 || input.level > 10)) {
+      throw new DomainError('VALIDATION', 'level must be a whole number from 1 to 10');
+    }
     const fee = await this.catalog.feeById(input.feeId);
     if (!fee) throw new DomainError('NOT_FOUND', 'Fee not found');
     if (!fee.allowInstalments) {
@@ -27,6 +30,7 @@ export class SetInstalmentRuleUseCase {
     await this.catalog.upsertInstalmentRule(
       input.feeId,
       input.department,
+      input.level,
       input.minInstalment,
       actor.id,
     );

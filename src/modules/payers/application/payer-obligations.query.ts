@@ -28,7 +28,7 @@ export class PayerObligationsQuery {
         const l = ledgers.get(o.id) ?? { entries: [], pending: [] };
         const pos = computePosition(o.amount, l.entries, l.pending, now);
         const ruleMin = o.allowInstalments
-          ? await this.catalog.instalmentRuleMin(o.feeId, payer.department)
+          ? await this.catalog.instalmentRuleMin(o.feeId, payer.department, payer.level)
           : null;
         return {
           obligation: o,

@@ -128,19 +128,22 @@ model RateRule {
   @@index([feeId])
 }
 
-/// Minimum instalment for one department's payers (overrides Fee.defaultMinInstalment).
+/// Minimum instalment for one department's payers, optionally one level (overrides Fee.defaultMinInstalment).
 model InstalmentRule {
   id            String   @id @default(uuid()) @db.Uuid
   feeId         String   @db.Uuid
   /// Department.code
   department    String
+  /// student level (1-10) this minimum is for; null = every level of the department.
+  /// One rule per (fee, department, level), null included: enforced under the fee row lock.
+  level         Int?
   minInstalment BigInt
   updatedBy     String
   updatedAt     DateTime @updatedAt
 
   fee Fee @relation(fields: [feeId], references: [id])
 
-  @@unique([feeId, department])
+  @@index([feeId, department])
 }
 
 model EligibilityRule {

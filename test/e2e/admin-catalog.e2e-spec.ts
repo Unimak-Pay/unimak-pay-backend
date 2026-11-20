@@ -112,6 +112,37 @@ describe('admin fee setup', () => {
     expect((await bursar.get(`/v1/admin/fees/${feeId}/preview?kind=student&ref=UNI-2025-0003`).expect(200)).body.minInstalment).toBe('10000');
   });
 
+  it('a minimum instalment can be set for one level; other levels keep the department rule', async () => {
+    const contact = await admin('FINANCE_OFFICER', ['instalments.manage']);
+    const url = `/v1/admin/fees/${feeId}/instalment-rules/COMPUTER-SCI`;
+    await contact.put(`${url}?level=11`, { minInstalment: '7000' }).expect(400);
+    await contact.put(`${url}?level=two`, { minInstalment: '7000' }).expect(400);
+    await contact.put(`${url}?level=2`, { minInstalment: '8000' }).expect(200);
+    const res = await contact.put(`${url}?level=2`, { minInstalment: '7000' }).expect(200); // same key: updated, not duplicated
+    expect(res.body).toMatchObject({ department: 'COMPUTER-SCI', level: 2, minInstalment: '7000' });
+
+    const fee = await bursar.get(`/v1/admin/fees/${feeId}`).expect(200);
+    expect(fee.body.instalmentRules.map((r: { department: string; level: number | null; minInstalment: string }) => [r.department, r.level, r.minInstalment]))
+      .toEqual([['COMPUTER-SCI', null, '10000'], ['COMPUTER-SCI', 2, '7000']]);
+
+    // UNI-2025-0003 is level 2, UNI-2026-0001 level 1 (both COMPUTER-SCI)
+    expect((await bursar.get(`/v1/admin/fees/${feeId}/preview?kind=student&ref=UNI-2025-0003`).expect(200)).body.minInstalment).toBe('7000');
+    expect((await bursar.get(`/v1/admin/fees/${feeId}/preview?kind=student&ref=UNI-2026-0001`).expect(200)).body.minInstalment).toBe('10000');
+    // the channels use it straight away (minimums are read at payment time)
+    const ob = await channel(http, 'get', '/v1/channel/payers/student/UNI-2025-0003/obligations').expect(200);
+    expect(ob.body.obligations.find((o: { feeTypeCode: string }) => o.feeTypeCode === 'LIB').minInstalment.value).toBe('7000');
+    const lib = ob.body.obligations.find((o: { feeTypeCode: string }) => o.feeTypeCode === 'LIB');
+    const low = await channel(http, 'post', '/v1/channel/quotes', { obligationId: lib.id, amount: '6999', channel: 'USSD' }).expect(422);
+    expect(low.body.error.code).toBe('AMOUNT_BELOW_MIN_INSTALMENT');
+    await channel(http, 'post', '/v1/channel/quotes', { obligationId: lib.id, amount: '7000', channel: 'USSD' }).expect(200);
+
+    // deleting the level rule falls back to the department rule; deleting by level never touches the all-levels rule
+    await bursar.del(`${url}?level=3`).expect(404);
+    await bursar.del(`${url}?level=2`).expect(200);
+    expect((await bursar.get(`/v1/admin/fees/${feeId}/preview?kind=student&ref=UNI-2025-0003`).expect(200)).body.minInstalment).toBe('10000');
+    expect((await bursar.get(`/v1/admin/fees/${feeId}`).expect(200)).body.instalmentRules).toHaveLength(1);
+  });
+
   it('closing a fee stops new obligations; read-only roles cannot change the catalog', async () => {
     const fo = await admin('FINANCE_OFFICER');
     await fo.get('/v1/admin/fees').expect(403); // finance officers don't have fees.read

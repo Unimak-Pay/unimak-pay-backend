@@ -8,6 +8,7 @@ import type {
   PricingConfigView,
 } from '../application/catalog.repository';
 import type { FeeWithRules } from '../domain/fee';
+import { pickInstalmentRule } from '../domain/instalments';
 import type { PayerKind } from '../domain/payer-profile';
 import type { RateRule } from '../domain/rate-rule';
 
@@ -111,27 +112,32 @@ export class PrismaCatalogRepository implements CatalogRepository {
   async instalmentRuleMin(
     feeId: string,
     department: string | null,
+    level: number | null,
     db: Db = this.prisma,
   ): Promise<Minor | null> {
     if (!department) return null;
-    const row = await db.instalmentRule.findUnique({
-      where: { feeId_department: { feeId, department } },
+    const rows = await db.instalmentRule.findMany({
+      where: { feeId, department, OR: [{ level: null }, ...(level !== null ? [{ level }] : [])] },
     });
-    return row?.minInstalment ?? null;
+    return pickInstalmentRule(rows, department, level)?.minInstalment ?? null;
   }
 
   async upsertInstalmentRule(
     feeId: string,
     department: string,
+    level: number | null,
     minInstalment: Minor,
     updatedBy: string,
-    db: Db = this.prisma,
+    db?: Db,
   ): Promise<void> {
-    await db.instalmentRule.upsert({
-      where: { feeId_department: { feeId, department } },
-      create: { feeId, department, minInstalment, updatedBy },
-      update: { minInstalment, updatedBy },
-    });
+    const write = async (tx: Db) => {
+      await tx.$queryRaw`SELECT id FROM "Fee" WHERE id = ${feeId}::uuid FOR UPDATE`;
+      const existing = await tx.instalmentRule.findFirst({ where: { feeId, department, level } });
+      if (existing) await tx.instalmentRule.update({ where: { id: existing.id }, data: { minInstalment, updatedBy } });
+      else await tx.instalmentRule.create({ data: { feeId, department, level, minInstalment, updatedBy } });
+    };
+    if (db) await write(db);
+    else await this.prisma.$transaction(write);
   }
 
   async effectivePricing(

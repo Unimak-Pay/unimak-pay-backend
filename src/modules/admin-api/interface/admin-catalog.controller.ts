@@ -6,7 +6,7 @@ import { AdminCatalogService } from '../application/admin-catalog.service';
 import { AdminRepriceService } from '../application/admin-reprice.service';
 import { BigIntJsonInterceptor } from './bigint-json.interceptor';
 import {
-  CreateFeeDto, CreateFeeTypeDto, EligibilityRuleDto, FeesQuery, InstalmentRuleDto, PreviewQuery, RateRuleDto, UpdateFeeDto, UpdateFeeTypeDto,
+  CreateFeeDto, CreateFeeTypeDto, EligibilityRuleDto, FeesQuery, InstalmentLevelQuery, InstalmentRuleDto, PreviewQuery, RateRuleDto, UpdateFeeDto, UpdateFeeTypeDto,
 } from './catalog.dto';
 
 const matchers = (d: Partial<Matchers>): Matchers => ({
@@ -156,14 +156,17 @@ export class AdminCatalogController {
 
   @Put('fees/:id/instalment-rules/:department')
   @RequirePermissions('instalments.manage')
-  setInstalment(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Param('department') department: string, @Body() dto: InstalmentRuleDto) {
-    return this.catalog.setInstalmentRule(admin, id, department, BigInt(dto.minInstalment));
+  setInstalment(
+    @CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Param('department') department: string,
+    @Query() q: InstalmentLevelQuery, @Body() dto: InstalmentRuleDto,
+  ) {
+    return this.catalog.setInstalmentRule(admin, id, department, q.level ?? null, BigInt(dto.minInstalment));
   }
 
   @Delete('fees/:id/instalment-rules/:department')
   @RequirePermissions('instalments.manage')
-  deleteInstalment(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Param('department') department: string) {
-    return this.catalog.deleteInstalmentRule(admin, id, department);
+  deleteInstalment(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Param('department') department: string, @Query() q: InstalmentLevelQuery) {
+    return this.catalog.deleteInstalmentRule(admin, id, department, q.level ?? null);
   }
 }
 
