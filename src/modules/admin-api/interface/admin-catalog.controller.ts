@@ -3,6 +3,7 @@ import type { AdminPrincipal } from '../../auth/application/admin-principal';
 import { AdminAuthGuard, CurrentAdmin, RequirePermissions } from '../../auth/interface/admin-auth.guard';
 import type { Matchers } from '../../catalog/domain/matchers';
 import { AdminCatalogService } from '../application/admin-catalog.service';
+import { AdminRepriceService } from '../application/admin-reprice.service';
 import { BigIntJsonInterceptor } from './bigint-json.interceptor';
 import {
   CreateFeeDto, CreateFeeTypeDto, EligibilityRuleDto, FeesQuery, InstalmentRuleDto, PreviewQuery, RateRuleDto, UpdateFeeDto, UpdateFeeTypeDto,
@@ -21,7 +22,10 @@ const matchers = (d: Partial<Matchers>): Matchers => ({
 @UseGuards(AdminAuthGuard)
 @UseInterceptors(BigIntJsonInterceptor)
 export class AdminCatalogController {
-  constructor(private readonly catalog: AdminCatalogService) {}
+  constructor(
+    private readonly catalog: AdminCatalogService,
+    private readonly reprice: AdminRepriceService,
+  ) {}
 
   // ── Fee types ──────────────────────────────────────────────────────────────
 
@@ -95,6 +99,21 @@ export class AdminCatalogController {
   @RequirePermissions('fees.read')
   preview(@Param('id', ParseUUIDPipe) id: string, @Query() q: PreviewQuery) {
     return this.catalog.preview(id, q.kind === 'student' ? 'STUDENT' : 'APPLICANT', q.ref.toUpperCase());
+  }
+
+  /** What re-pricing would change after a rate rule edit (no writes). */
+  @Get('fees/:id/reprice')
+  @RequirePermissions('fees.manage')
+  previewReprice(@Param('id', ParseUUIDPipe) id: string) {
+    return this.reprice.preview(id);
+  }
+
+  /** Moves untouched obligations to the current rate rules (ADJUSTMENT ledger entries, audited). */
+  @Post('fees/:id/reprice')
+  @HttpCode(200)
+  @RequirePermissions('fees.manage')
+  applyReprice(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string) {
+    return this.reprice.apply(admin, id);
   }
 
   // ── Rate rules ─────────────────────────────────────────────────────────────

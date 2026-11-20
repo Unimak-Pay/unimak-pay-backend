@@ -287,6 +287,7 @@ they don't hold, and only super admins manage super admins. Every write is recor
 | POST/PUT/DELETE | `/fees/:id/rate-rules[/:ruleId]` `{programCode?, department?, level?, residency?, intake?, amount}` — ties rejected; deleting a tie-breaker refused | `fees.manage` |
 | POST/DELETE | `/fees/:id/eligibility-rules[/:ruleId]` (same matchers + `finalYear?`) | `fees.manage` |
 | PUT/DELETE | `/fees/:id/instalment-rules/:department` `{minInstalment}` — minimum instalment per department | `instalments.manage` |
+| GET/POST | `/fees/:id/reprice` — preview / apply: obligations created before a rate-rule change move to the current rule if untouched (OPEN, no payments, nothing in progress), via an ADJUSTMENT ledger entry; the rest are listed with a reason | `fees.manage` |
 | GET | `/faculties` (with departments), `/departments?faculty=&needsReview=&active=`, `/departments/:code` | any admin |
 | POST/PATCH | `/faculties`, `/faculties/:code` `{name?, active?}`; `/departments`, `/departments/:code` `{name?, facultyCode?, active?}` | `academics.manage` |
 | GET | `/reports/summary?from=&to=&feeType=&channel=&department=&faculty=` — collected by day / fee type / channel / faculty / department, payment funnel, commission, payouts | `reports.read` |

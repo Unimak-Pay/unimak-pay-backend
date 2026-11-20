@@ -1138,6 +1138,43 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /v1/admin/fees/{id}/reprice:
+    get:
+      operationId: adminPreviewReprice
+      tags: [Admin · Fee setup]
+      summary: What re-pricing would change (writes nothing)
+      description: |
+        Obligations copy their amount from the best rate rule when they're created; editing a rule
+        doesn't change them. This lists what applying would do: untouched obligations (OPEN, no
+        payment or refund, no payment in progress) move to the current best rule; the rest are
+        listed under `skipped` with the reason, for a person to decide.
+      x-permission: fees.manage
+      security: [{ adminJwt: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: Preview, content: { application/json: { schema: { $ref: '#/components/schemas/RepriceReport' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    post:
+      operationId: adminApplyReprice
+      tags: [Admin · Fee setup]
+      summary: Move untouched obligations to the current rate rules
+      description: |
+        Decides again under lock, then for each change appends an ADJUSTMENT ledger entry for the
+        difference and updates the obligation's amount. Audited as `fee.reprice`. Running it again
+        changes nothing.
+      x-permission: fees.manage
+      security: [{ adminJwt: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: Applied, content: { application/json: { schema: { $ref: '#/components/schemas/RepriceReport' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /v1/admin/fees/{id}/rate-rules:
     post:
       operationId: adminAddRateRule
@@ -1781,6 +1818,49 @@ components:
                   value: { type: integer, example: 150000 }
               quantity: { const: 1 }
         metadata: { type: object, additionalProperties: { type: string } }
+    RepriceReport:
+      type: object
+      required: [fee, applied, changes, skipped, unchanged, totals]
+      properties:
+        fee: { type: object, required: [id, name], properties: { id: { type: string, format: uuid }, name: { type: string } } }
+        applied: { type: boolean }
+        changes:
+          type: array
+          items:
+            type: object
+            required: [obligationId, payer, current, proposed, difference, rateRuleId]
+            properties:
+              obligationId: { type: string, format: uuid }
+              payer: { $ref: '#/components/schemas/RepricePayer' }
+              current: { type: string, description: 'SLE minor units' }
+              proposed: { type: string, description: 'SLE minor units' }
+              difference: { type: string, description: 'proposed - current, may be negative' }
+              rateRuleId: { type: string, format: uuid }
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [obligationId, payer, current, reason]
+            properties:
+              obligationId: { type: string, format: uuid }
+              payer: { $ref: '#/components/schemas/RepricePayer' }
+              current: { type: string, description: 'SLE minor units' }
+              reason: { type: string, enum: [PAID, HAS_PAYMENTS, PAYMENT_IN_PROGRESS, NOT_ELIGIBLE, NO_RATE_RULE, AMBIGUOUS_RATE_RULE] }
+        unchanged: { type: integer, description: 'Obligations already at the current price' }
+        totals:
+          type: object
+          required: [obligations, changed, difference]
+          properties:
+            obligations: { type: integer }
+            changed: { type: integer }
+            difference: { type: string, description: 'Sum of differences, SLE minor units' }
+    RepricePayer:
+      type: object
+      required: [kind, ref, fullName]
+      properties:
+        kind: { type: string, enum: [applicant, student] }
+        ref: { type: string }
+        fullName: { type: string }
     Permission:
       type: string
       enum: [fees.read, fees.manage, instalments.manage, payers.read, payers.adjust, payments.read, payments.export, payments.refund, payments.reconcile, receipts.resend, accounts.read, accounts.manage, payouts.read, payouts.manage, transfers.read, transfers.retry, reconciliation.read, reconciliation.manage, outbox.read, outbox.retry, reports.read, audit.read, users.manage, settings.manage, academics.manage]

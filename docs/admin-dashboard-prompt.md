@@ -104,6 +104,7 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
    - **Eligibility rules** (`POST` / `DELETE`). **Minimum instalment per department** (`PUT` / `DELETE /instalment-rules/{department}`; needs `instalments.manage`).
    - Every department field in these forms is a **dropdown** of active, reviewed departments grouped by faculty (from `GET /v1/admin/faculties`), never free text. The server rejects anything else with 400.
    - **Preview:** "What would this payer owe?" (`GET /v1/admin/fees/{id}/preview?kind=student|applicant&ref=`) shows eligible, amount, minInstalment and reason.
+   - **Re-price** (`fees.manage`): after rate rules change, a "Re-price existing obligations" button on the fee opens `GET /v1/admin/fees/{id}/reprice`. Show the changes (payer, current → proposed, difference), the total difference, the unchanged count and the skipped list with reasons (`PAID`, `HAS_PAYMENTS`, `PAYMENT_IN_PROGRESS`, `NOT_ELIGIBLE`, `NO_RATE_RULE`, `AMBIGUOUS_RATE_RULE`). "Apply" (behind a confirm dialog) calls `POST` and shows the returned report. Hide the button when the preview has no changes. Suggest it after a rate rule is saved or deleted.
 
 5. **Treasury**:
    - **Accounts:** list with balances and a refresh button per account (`POST /v1/admin/financial-accounts/{id}/refresh-balance`). **"Create missing accounts"** (`POST /v1/admin/financial-accounts/provision`, `accounts.manage`) sits behind a confirm dialog.

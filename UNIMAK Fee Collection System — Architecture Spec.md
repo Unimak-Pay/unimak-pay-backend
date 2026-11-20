@@ -61,6 +61,8 @@ The core idea: a **fee** says what is charged and to whom, a **rate rule** says 
 2. Finds every active fee whose eligibility matches them.
 3. Creates any missing obligation, copying in the amount from the best-matching rate rule, keyed on (payer, fee).
 
+Editing a rate rule doesn't change obligations already created. **Re-pricing** (owner decision, 2026-11-20) moves them: an admin with `fees.manage` previews and applies it per fee. Only untouched obligations move (OPEN, no payment or refund, no payment in progress); each change is an ADJUSTMENT ledger entry for the difference plus the new amount on the obligation, audited as `fee.reprice`. The rest are listed with a reason for a person to decide.
+
 The admin can also pre-generate obligations for a cohort through the portal's cohort batch endpoint, so dashboards show who hasn't paid yet.
 
 **Ledger.** Each `LedgerEntry` is a charge (+), a payment (−), an adjustment (±: waiver, scholarship, correction) or a refund (+). For any obligation, balance = sum of entries. Status comes from the balance: unpaid, partial, paid or overpaid. Entries are never edited; a mistake is fixed with a reversing entry.

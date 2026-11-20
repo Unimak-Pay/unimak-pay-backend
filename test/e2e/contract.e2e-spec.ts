@@ -186,6 +186,8 @@ describe('admin API responses match openapi.yaml', () => {
     conforms('get', '/v1/admin/fees', await as('get', '/v1/admin/fees').expect(200));
     conforms('get', '/v1/admin/fees/{id}', await as('get', `/v1/admin/fees/${fee.id}`).expect(200));
     conforms('get', '/v1/admin/fees/{id}/preview', await as('get', `/v1/admin/fees/${fee.id}/preview?kind=student&ref=UNI-2024-0007`).expect(200));
+    conforms('get', '/v1/admin/fees/{id}/reprice', await as('get', `/v1/admin/fees/${fee.id}/reprice`).expect(200));
+    conforms('post', '/v1/admin/fees/{id}/reprice', await as('post', `/v1/admin/fees/${fee.id}/reprice`).expect(200));
     conforms('delete', '/v1/admin/fees/{id}/instalment-rules/{department}', await as('delete', `/v1/admin/fees/${fee.id}/instalment-rules/NURSING`).expect(200));
     conforms('delete', '/v1/admin/fees/{id}/eligibility-rules/{ruleId}', await as('delete', `/v1/admin/fees/${fee.id}/eligibility-rules/${el.id}`).expect(200));
     // the last rate rule can go once the fee is back to draft
