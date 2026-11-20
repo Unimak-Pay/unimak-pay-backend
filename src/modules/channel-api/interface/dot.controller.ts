@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, UseGuards } from '@nestjs/common';
 import { DomainError } from '../../../shared/domain/errors';
+import { AcademicsService } from '../../academics/application/academics.service';
 import type { PayerKind } from '../../catalog/domain/payer-profile';
 import { LookupPayerUseCase } from '../../payers/application/lookup-payer.use-case';
 import { PayerObligationsQuery } from '../../payers/application/payer-obligations.query';
@@ -10,14 +11,14 @@ import { QuotePaymentUseCase } from '../../payments/application/quote-payment.us
 import { DotRateLimitGuard } from './dot-rate-limit.guard';
 import { DotAmountDto, IDEMPOTENCY_KEY } from './dto';
 import { PayerKindPipe, RefPipe } from './payer-kind.pipe';
-import { presentDotOrder, presentObligation, presentPayer, presentPayment, presentPaymentStatus } from './presenters';
+import { presentDotOrder, presentDotPayer, presentObligation, presentPayment, presentPaymentStatus } from './presenters';
 
 /** clientId recorded on payments started from the dot (idempotency scope). */
 export const DOT_CLIENT_ID = 'dash-dot';
 
 /**
  * Public API for the UNIMAK dot in Monime Dash. A dot's code is public, so there is
- * no secret: callers are limited per IP, payer details are masked, and everything
+ * no secret: callers are limited per IP, phones are masked, and everything
  * that matters (amounts, the receiving account) is decided here. Money only moves
  * in Dash's payment sheet, and only Monime's webhook marks a payment COMPLETED.
  */
@@ -26,6 +27,7 @@ export const DOT_CLIENT_ID = 'dash-dot';
 export class DotController {
   constructor(
     private readonly lookup: LookupPayerUseCase,
+    private readonly academics: AcademicsService,
     private readonly obligations: PayerObligationsQuery,
     private readonly quote: QuotePaymentUseCase,
     private readonly initiate: InitiatePaymentUseCase,
@@ -36,8 +38,11 @@ export class DotController {
   @Get('payers/:kind/:ref')
   async getPayer(@Param('kind', PayerKindPipe) kind: PayerKind, @Param('ref', RefPipe) ref: string) {
     const { payer, stale } = await this.lookup.execute(kind, ref);
-    const views = await this.obligations.forPayer(payer);
-    return { payer: presentPayer(payer, stale), obligations: views.map(presentObligation) };
+    const [views, names] = await Promise.all([this.obligations.forPayer(payer), this.academics.names([payer.department])]);
+    return {
+      payer: presentDotPayer(payer, stale, payer.department ? names.get(payer.department) : undefined),
+      obligations: views.map(presentObligation),
+    };
   }
 
   @Post('quotes')

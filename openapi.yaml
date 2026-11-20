@@ -44,7 +44,7 @@ tags:
     description: |
       Public API for the UNIMAK dot in Monime Dash. A dot's code is public, so there is no secret:
       requests are limited per IP (`DOT_RATE_LIMIT_PER_MINUTE`, 429 `RATE_LIMITED` with `Retry-After`),
-      payer details are masked, and amounts and the receiving account are decided by the server.
+      the lookup shows the full name but a masked phone (status lookups stay masked), and amounts and the receiving account are decided by the server.
       The dot pays with `dash.payments.request({ order, financialAccountId })` using what
       `POST /v1/dot/payments` returns; Monime's `payment.processing_completed` webhook (matched on
       `reference` = our payment id) is the only thing that marks it paid.
@@ -256,19 +256,21 @@ paths:
       operationId: dotGetPayer
       tags: [Dash dot]
       summary: Look up a payer and what they owe
-      description: Fetches from the university portal (cached) and creates any missing obligations.
+      description: |
+        Fetches from the university portal (cached) and creates any missing obligations.
+        Returns the full name and academic details; the phone is masked.
       security: []
       parameters: [{ $ref: '#/components/parameters/PayerKind' }, { $ref: '#/components/parameters/PayerRef' }]
       responses:
         '200':
-          description: Payer (masked) and obligations
+          description: Payer and obligations
           content:
             application/json:
               schema:
                 type: object
                 required: [payer, obligations]
                 properties:
-                  payer: { $ref: '#/components/schemas/Payer' }
+                  payer: { $ref: '#/components/schemas/DotPayer' }
                   obligations: { type: array, items: { $ref: '#/components/schemas/Obligation' } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -1729,6 +1731,26 @@ components:
         value: { type: string, example: '150000' }
         display: { type: string, example: 'SLE 1,500.00' }
     PaymentRef: { type: string, pattern: '^[1-9]\d{7}$', example: '15540719', description: '8-digit ref to give the payer for status checks.' }
+    DotPayer:
+      type: object
+      required: [kind, ref, fullName, maskedPhone, programCode, programLine, department, departmentName, facultyCode, facultyName, level, finalYear, residency, intake, applicantStatus, stale]
+      properties:
+        kind: { type: string, enum: [applicant, student] }
+        ref: { type: string, example: UNI-2026-0001 }
+        fullName: { type: string, example: Abdul Koroma }
+        maskedPhone: { type: [string, 'null'], example: '+232*****001' }
+        programCode: { type: string, example: BSC-CS }
+        programLine: { type: string, example: 'BSC-CS · Level 1' }
+        department: { type: [string, 'null'], example: COMPUTER-SCI }
+        departmentName: { type: [string, 'null'], example: Computer Science, description: 'null when the department is unknown or not yet listed' }
+        facultyCode: { type: [string, 'null'] }
+        facultyName: { type: [string, 'null'] }
+        level: { type: [integer, 'null'], description: 'Students only' }
+        finalYear: { type: [boolean, 'null'], description: 'Students only' }
+        residency: { $ref: '#/components/schemas/Residency' }
+        intake: { type: string, example: 2026-SEP }
+        applicantStatus: { type: [string, 'null'], description: 'Applicants only (e.g. APPLIED, ADMITTED)' }
+        stale: { type: boolean, description: 'true when the portal was down and this is the last snapshot' }
     DotAmountRequest:
       type: object
       required: [obligationId, amount]

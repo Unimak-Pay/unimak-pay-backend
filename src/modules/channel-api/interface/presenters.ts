@@ -1,4 +1,5 @@
-import { maskName } from '../../../shared/domain/mask';
+import { maskName, maskPhone } from '../../../shared/domain/mask';
+import type { DepartmentNames } from '../../academics/application/academics.service';
 import { formatSle } from '../../../shared/domain/money';
 import type { ObligationView } from '../../payers/application/payer-obligations.query';
 import { type Payer, programLine } from '../../payers/domain/payer';
@@ -14,6 +15,31 @@ export function presentPayer(p: Payer, stale: boolean) {
     ref: p.ref,
     maskedName: maskName(p.fullName),
     programLine: programLine(p),
+    stale,
+  };
+}
+
+/**
+ * The dot's lookup: full name and academic details, phone masked. Decided with the
+ * owner (2026-11-20), replacing the brief's masked-name-only rule for this route.
+ */
+export function presentDotPayer(p: Payer, stale: boolean, names: DepartmentNames | undefined) {
+  return {
+    kind: p.kind.toLowerCase(),
+    ref: p.ref,
+    fullName: p.fullName,
+    maskedPhone: p.phone ? maskPhone(p.phone) : null,
+    programCode: p.programCode,
+    programLine: programLine(p),
+    department: p.department,
+    departmentName: names?.departmentName ?? null,
+    facultyCode: names?.facultyCode ?? null,
+    facultyName: names?.facultyName ?? null,
+    level: p.level,
+    finalYear: p.finalYear,
+    residency: p.residency,
+    intake: p.intake,
+    applicantStatus: p.applicantStatus,
     stale,
   };
 }

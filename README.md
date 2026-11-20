@@ -166,7 +166,7 @@ There are four API surfaces, each with its own protection:
 |---|---|---|
 | `POST /v1/ussd/exchange/<token>` | Monime USSD flow (HTTPS domain) | RSA-OAEP + AES-128-GCM (our key pair), secret path token |
 | `/v1/channel/*` | Server-to-server clients | API key + HMAC over timestamp + body |
-| `/v1/dot/*` | The UNIMAK dot in Monime Dash (its code is public) | None: per-IP limit, masked payer, server-decided amounts |
+| `/v1/dot/*` | The UNIMAK dot in Monime Dash (its code is public) | None: per-IP limit, masked phone, server-decided amounts |
 | `/v1/admin/*` | Admin portal | Supabase Auth access token + role/permission guard, 2FA for bursar & super admin |
 | `/webhooks/monime`, `/r/:code` | Monime / anyone | Monime HMAC signature / public read-only |
 
@@ -354,7 +354,7 @@ a Vercel Firewall rate-limit rule on `/v1/dot/` for a global one.
 
 | Method | Path | |
 |---|---|---|
-| GET | `/payers/:kind/:ref` | masked payer + obligations (as the channel API's `/obligations`) |
+| GET | `/payers/:kind/:ref` | full name, programme, department/faculty names, level, intake, residency, applicant status, masked phone + obligations |
 | POST | `/quotes` | `{obligationId, amount}`, channel DOTS |
 | POST | `/payments` | `{obligationId, amount}` + `Idempotency-Key` header → `{paymentId, paymentRef, status, amount, expiresAt, order, financialAccountId}` |
 | GET | `/payments/status/:ref` | by `paymentRef` or Monime's order number (payer masked) |

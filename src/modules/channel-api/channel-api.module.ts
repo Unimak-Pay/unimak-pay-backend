@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AcademicsModule } from '../academics/academics.module';
 import { PayersModule } from '../payers/payers.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { ReceiptsModule } from '../receipts/receipts.module';
@@ -10,7 +11,7 @@ import { DotController } from './interface/dot.controller';
 import { PublicReceiptController } from './interface/public-receipt.controller';
 
 @Module({
-  imports: [PayersModule, PaymentsModule, ReceiptsModule],
+  imports: [AcademicsModule, PayersModule, PaymentsModule, ReceiptsModule],
   controllers: [ChannelController, DotController, PublicReceiptController],
   providers: [ChannelClients, ChannelAuthGuard, DotRateLimitGuard],
 })

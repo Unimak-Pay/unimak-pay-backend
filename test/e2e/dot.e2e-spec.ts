@@ -44,12 +44,20 @@ describe('public dot API: lookup → payment order → Monime webhook', () => {
   let obligationId: string;
   let paymentId: string;
 
-  it('needs no credentials and masks the payer', async () => {
+  it('needs no credentials; full name and academic details, phone masked', async () => {
     const res = await get(`/v1/dot/payers/student/${REF}`).expect(200);
-    expect(res.body.payer).toEqual({ kind: 'student', ref: REF, maskedName: 'D*** S***', programLine: expect.any(String), stale: false });
+    expect(res.body.payer).toEqual({
+      kind: 'student', ref: REF, fullName: 'Dot Student', maskedPhone: '+232*****093',
+      programCode: 'BSC-CS', programLine: 'BSC-CS · Level 1',
+      department: 'COMPUTER-SCI', departmentName: expect.any(String), facultyCode: expect.any(String), facultyName: expect.any(String),
+      level: 1, finalYear: false, residency: 'LOCAL', intake: '2026-SEP', applicantStatus: null, stale: false,
+    });
+    expect(res.body.payer.phone).toBeUndefined();
     const tuition = res.body.obligations.find((o: { feeTypeCode: string }) => o.feeTypeCode === 'TUITION');
     expect(tuition).toMatchObject({ allowInstalments: true, minInstalment: { value: '150000' }, status: 'OPEN' });
     obligationId = tuition.id;
+    const applicant = await get('/v1/dot/payers/applicant/APP-2026-0003').expect(200);
+    expect(applicant.body.payer).toMatchObject({ kind: 'applicant', fullName: 'Fatmata Sesay', level: null, finalYear: null, applicantStatus: 'REJECTED', departmentName: expect.any(String) });
     await get('/v1/dot/payers/student/UNI-1999-0000').expect(404);
     await get('/v1/dot/payers/staff/x').expect(400);
   });
