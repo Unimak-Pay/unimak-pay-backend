@@ -343,7 +343,7 @@ Four screens at most to start a payment, numeric input only, with each response 
 1. Pay a fee
    → 1. Student ID   2. Application No.
    → Enter ID ................................ [GET /payers]
-   → "A*** K*** – BSc Nursing Yr 2. 1 Yes  2 No"
+   → "Aminata K. – BSc Nursing Yr 2. 1 Yes  2 No"
    → Fee list, e.g.                           [GET /obligations]
         1. Tuition 26/27  bal SLE 4,500
         2. Dept fee       bal SLE 300
@@ -426,7 +426,7 @@ Supabase is used for Postgres, Auth (admin users only) and Storage (receipt PDFs
 
 - Channel API: an API key per channel plus an HMAC-signed body with a timestamp (±5 min). Reject anything unsigned.
 - Webhooks: verify Monime's signature and dedupe on the event id.
-- Lookups return masked names only (`A*** K***`), and are rate-limited per phone and per ID to stop people enumerating student IDs.
+- Lookups are rate-limited to stop people enumerating student IDs. Names shown (owner decisions, 2026-11-20): USSD shows first name + surname initial (`Aminata K.`); the dot lookup shows the full name with the phone masked; the channel API and payment status lookups return masked names (`A*** K***`).
 - Admin: Supabase Auth with 2FA required for bursar and super admin. Every write produces an `AuditLog` row with before and after values.
 - Ledger entries are append-only: no updates or deletes at the database level (revoke `UPDATE` and `DELETE` on the table).
 

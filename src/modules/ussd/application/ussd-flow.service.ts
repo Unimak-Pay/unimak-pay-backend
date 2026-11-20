@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { AppConfig } from '../../../config/app-config';
 import { DomainError } from '../../../shared/domain/errors';
-import { maskName } from '../../../shared/domain/mask';
+import { shortName } from '../../../shared/domain/mask';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
 import { LookupPayerUseCase } from '../../payers/application/lookup-payer.use-case';
 import { PayerObligationsQuery } from '../../payers/application/payer-obligations.query';
@@ -127,7 +127,7 @@ export class UssdFlowService {
     const next: SessionState = { ...state, ref: payer.ref };
     if (state.intent === 'balance') return this.finish(id, next, await this.balanceText(payer));
     await this.save(id, { ...next, expect: PAGES.confirmPayer });
-    return go(PAGES.confirmPayer, { payer_name: maskName(payer.fullName), program_line: programLine(payer) });
+    return go(PAGES.confirmPayer, { payer_name: shortName(payer.fullName), program_line: programLine(payer) });
   }
 
   private async tryAgain(id: string, state: SessionState, input: string): Promise<ExchangeReply> {
@@ -140,7 +140,7 @@ export class UssdFlowService {
     if (input !== 'continue') return this.finish(id, state, 'Cancelled.');
     const payer = await this.payer(state);
     const open = (await this.obligations.forPayer(payer)).filter((v) => v.payable > 0n).slice(0, 8);
-    if (open.length === 0) return this.finish(id, state, `${maskName(payer.fullName)}: nothing to pay right now. All clear!`);
+    if (open.length === 0) return this.finish(id, state, `${shortName(payer.fullName)}: nothing to pay right now. All clear!`);
     const options = Object.fromEntries(open.map((v, i) => [String(i + 1), v.obligation.id]));
     await this.save(id, { ...state, feeOptions: options, expect: PAGES.selectFee });
     return go(PAGES.selectFee, {
@@ -226,7 +226,7 @@ export class UssdFlowService {
   private async toConfirm(id: string, state: SessionState): Promise<ExchangeReply> {
     const payer = await this.payer(state);
     await this.save(id, { ...state, expect: PAGES.confirmPayment });
-    return go(PAGES.confirmPayment, { payer_name: maskName(payer.fullName), fee_name: state.feeName!, amount_display: sleShort(BigInt(state.amount!)) });
+    return go(PAGES.confirmPayment, { payer_name: shortName(payer.fullName), fee_name: state.feeName!, amount_display: sleShort(BigInt(state.amount!)) });
   }
 
   private amountPageData(state: SessionState): Record<string, unknown> {
@@ -246,7 +246,7 @@ export class UssdFlowService {
   private async balanceText(payer: Payer): Promise<string> {
     const views = await this.obligations.forPayer(payer);
     const lines = views.filter((v) => v.balance > 0n).map((v) => `${v.obligation.feeName}: ${sleShort(v.balance)}`);
-    return lines.length ? `${maskName(payer.fullName)}\n${lines.join('\n')}` : `${maskName(payer.fullName)}: all clear.`;
+    return lines.length ? `${shortName(payer.fullName)}\n${lines.join('\n')}` : `${shortName(payer.fullName)}: all clear.`;
   }
 
   /** Status by our payment ref or Monime's order number; rate-limited like ID lookups. */
@@ -317,7 +317,7 @@ export function paymentStatusText(v: PaymentStatusView): string {
   return [
     `Payment ${v.paymentRef}: ${STATUS_LINE[v.status]}`,
     `${sleShort(v.amount)} ${v.feeName}`,
-    `${v.maskedName} (${v.payerRef})`,
+    `${v.shortName} (${v.payerRef})`,
     ...(v.receiptNumber ? [`Receipt ${v.receiptNumber}`] : []),
   ].join('\n');
 }

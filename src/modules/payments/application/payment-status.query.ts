@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { maskName } from '../../../shared/domain/mask';
+import { maskName, shortName } from '../../../shared/domain/mask';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
 import { MONIME_ORDER_NUMBER, normalizePublicRef, PAYMENT_REF } from '../domain/payment-ref';
 import { isOpen, type PaymentStatus } from '../domain/payment-status';
@@ -15,6 +15,8 @@ export interface PaymentStatusView {
   payerKind: 'APPLICANT' | 'STUDENT';
   payerRef: string;
   maskedName: string;
+  /** "Aminata K." — USSD screens only */
+  shortName: string;
   receiptNumber: string | null;
   createdAt: Date;
   completedAt: Date | null;
@@ -44,6 +46,7 @@ export class PaymentStatusQuery {
       payerKind: p.obligation.payer.kind,
       payerRef: p.obligation.payer.ref,
       maskedName: maskName(p.obligation.payer.fullName),
+      shortName: shortName(p.obligation.payer.fullName),
       receiptNumber: p.receipt?.number ?? null,
       createdAt: p.createdAt,
       completedAt: p.completedAt,

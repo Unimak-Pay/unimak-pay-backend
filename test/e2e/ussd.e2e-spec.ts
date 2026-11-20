@@ -129,7 +129,7 @@ describe('USSD menus', () => {
 
   it('check balance lists fees with balances', async () => {
     const { reply } = await toPayer('balance', 'student', 'uni-2025-0003');
-    expect(reply).toMatchObject({ action: 'stop', message: expect.stringMatching(/^C\*\*\* O\*\*\*\nTuition 2026\/27: SLE /) });
+    expect(reply).toMatchObject({ action: 'stop', message: expect.stringMatching(/^Chinedu O\.\nTuition 2026\/27: SLE /) });
   });
 });
 
@@ -138,7 +138,7 @@ describe('USSD payment journey (collect_payment)', () => {
 
   it('student pays a tuition instalment; the flow hands over to collect_payment', async () => {
     const { s, reply } = await toPayer('pay', 'student', 'uni-2026-0005');
-    expect(reply).toEqual({ action: 'navigate', pageId: 'confirm_payer', pageData: { payer_name: 'I*** K***', program_line: 'BSC-NUR · Level 1' } });
+    expect(reply).toEqual({ action: 'navigate', pageId: 'confirm_payer', pageData: { payer_name: 'Ibrahim K.', program_line: 'BSC-NUR · Level 1' } });
 
     const fees = (await s.step('confirm_payer', 'continue')) as Nav;
     expect(fees.pageId).toBe('select_fee');
@@ -149,7 +149,7 @@ describe('USSD payment journey (collect_payment)', () => {
     expect(await s.step('enter_amount', '1000')).toEqual({ action: 'navigate', pageId: 'try_again', pageData: { message: 'Enter an amount from SLE 2,000 to SLE 7,000.' } });
     expect(await s.step('try_again', 'retry')).toEqual({ action: 'navigate', pageId: 'enter_amount', pageData: amountPage });
     expect(await s.step('enter_amount', '2,500')).toEqual({
-      action: 'navigate', pageId: 'confirm_payment', pageData: { payer_name: 'I*** K***', fee_name: 'Tuition 2026/27', amount_display: 'SLE 2,500' },
+      action: 'navigate', pageId: 'confirm_payment', pageData: { payer_name: 'Ibrahim K.', fee_name: 'Tuition 2026/27', amount_display: 'SLE 2,500' },
     });
 
     const pay = (await s.step('confirm_payment', 'confirm')) as Nav;
@@ -202,7 +202,7 @@ describe('USSD payment journey (collect_payment)', () => {
     expect(await byRef.step('home', 'status')).toEqual({ action: 'navigate', pageId: 'enter_payment_ref', pageData: {} });
     expect(await byRef.step('enter_payment_ref', ` ${p.paymentRef} `)).toEqual({
       action: 'stop',
-      message: `Payment ${p.paymentRef}: PAID\nSLE 2,500 Tuition 2026/27\nI*** K*** (UNI-2026-0005)\nReceipt ${p.receipt!.number}`,
+      message: `Payment ${p.paymentRef}: PAID\nSLE 2,500 Tuition 2026/27\nIbrahim K. (UNI-2026-0005)\nReceipt ${p.receipt!.number}`,
     });
     const byOrder = session(phone);
     await byOrder.step('home', 'status');
