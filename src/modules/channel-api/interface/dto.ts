@@ -37,3 +37,16 @@ export class QuoteDto {
   @IsIn(['USSD', 'DOTS'])
   channel!: 'USSD' | 'DOTS';
 }
+
+/** Public dot API: the channel is always DOTS. */
+export class DotAmountDto {
+  @IsUUID()
+  obligationId!: string;
+
+  @Transform(toDigitString)
+  @Matches(AMOUNT, { message: 'amount must be a positive integer of minor units' })
+  amount!: string;
+}
+
+/** `Idempotency-Key` header of POST /v1/dot/payments. */
+export const IDEMPOTENCY_KEY = /^[A-Za-z0-9_.:-]{8,100}$/;

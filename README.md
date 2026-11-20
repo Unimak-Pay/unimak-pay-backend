@@ -1,8 +1,8 @@
 # UNIMAK fee collection — backend
 
 System of record for money at the University of Makeni: fees, obligations, ledger,
-payments and receipts. Payments are collected through **Monime** (USSD and the Dash
-"Dots" mini-app, which call our **channel API**). Applicants and students come from
+payments and receipts. Payments are collected through **Monime**: USSD, and the UNIMAK dot in Dash (our
+public **dot API** plus Dash's payment sheet). Applicants and students come from
 the university portal (mocked with JSON fixtures for now).
 
 NestJS 11 · TypeScript (strict) · Prisma 6 · Postgres (Supabase) · one Vercel function · pnpm
@@ -165,7 +165,8 @@ There are four API surfaces, each with its own protection:
 | Surface | Who calls it | Protection |
 |---|---|---|
 | `POST /v1/ussd/exchange/<token>` | Monime USSD flow (HTTPS domain) | RSA-OAEP + AES-128-GCM (our key pair), secret path token |
-| `/v1/channel/*` | Dash Dots (and other server-to-server clients) | API key + HMAC over timestamp + body |
+| `/v1/channel/*` | Server-to-server clients | API key + HMAC over timestamp + body |
+| `/v1/dot/*` | The UNIMAK dot in Monime Dash (its code is public) | None: per-IP limit, masked payer, server-decided amounts |
 | `/v1/admin/*` | Admin portal | Supabase Auth access token + role/permission guard, 2FA for bursar & super admin |
 | `/webhooks/monime`, `/r/:code` | Monime / anyone | Monime HMAC signature / public read-only |
 
@@ -344,7 +345,28 @@ It reads `SUPABASE_URL`, `SUPABASE_ANON_KEY` (the publishable key from Project S
 API Keys; not a secret) and `API_URL`/`PUBLIC_BASE_URL` from `.env` and
 `.env.production.local`. Tokens last about an hour.
 
-### Channel API — `/v1/channel` (Dash Dots)
+### Dot API — `/v1/dot` (the UNIMAK dot in Monime Dash)
+
+A dot's code and `.env` are public, so it can't hold a channel secret. These routes need
+no credentials. Each client IP gets `DOT_RATE_LIMIT_PER_MINUTE` requests (default 60;
+429 `RATE_LIMITED` with `Retry-After`). The limit is counted per function instance, so add
+a Vercel Firewall rate-limit rule on `/v1/dot/` for a global one.
+
+| Method | Path | |
+|---|---|---|
+| GET | `/payers/:kind/:ref` | masked payer + obligations (as the channel API's `/obligations`) |
+| POST | `/quotes` | `{obligationId, amount}`, channel DOTS |
+| POST | `/payments` | `{obligationId, amount}` + `Idempotency-Key` header → `{paymentId, paymentRef, status, amount, expiresAt, order, financialAccountId}` |
+| GET | `/payments/status/:ref` | by `paymentRef` or Monime's order number (payer masked) |
+
+`POST /payments` holds the amount (15 min) and records a PENDING payment with collection
+method `DASH_SHEET`; it makes no Monime call. The dot passes `order` and
+`financialAccountId` unchanged to `dash.payments.request()`. `order.reference` is our
+payment id, so Monime's `payment.processing_completed` settles it like any other payment
+(the webhook carries the reference, metadata and financial account). The dot must belong
+to the same Space as `MONIME_API_KEY`.
+
+### Channel API — `/v1/channel` (server-to-server)
 
 Every request carries:
 
@@ -510,6 +532,7 @@ Set on Vercel: `DATABASE_URL` (Supabase transaction pooler,
 `NODE_ENV=production`, `PUBLIC_BASE_URL`, the Monime and portal settings,
 `MONIME_WEBHOOK_SECRET` (32–256 chars), `CHANNEL_CLIENTS`, `CRON_SECRET`,
 `SUPABASE_URL` (admin auth), `USSD_RSA_PRIVATE_KEY` and `USSD_EXCHANGE_PATH_TOKEN`.
+Optional: `DOT_RATE_LIMIT_PER_MINUTE` (default 60).
 Run `pnpm db:deploy` with `DIRECT_URL` before deploying a new migration, then
 `pnpm monime:provision` and `pnpm monime:register-webhook https://<domain>/webhooks/monime`
 once per environment.

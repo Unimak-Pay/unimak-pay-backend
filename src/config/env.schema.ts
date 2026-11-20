@@ -183,6 +183,13 @@ export class EnvSchema {
   @Max(120)
   PAYMENT_EXPIRY_MINUTES = 15;
 
+  /** Requests per minute per client IP on the public dot API (/v1/dot). */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10_000)
+  DOT_RATE_LIMIT_PER_MINUTE = 60;
+
   /** Try dispatching outbox messages right after commit (disable in some tests). */
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()

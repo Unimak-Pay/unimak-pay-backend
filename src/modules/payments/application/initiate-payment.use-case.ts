@@ -7,7 +7,7 @@ import { PrismaService } from '../../../shared/infrastructure/prisma.service';
 import type { Channel } from '../../catalog/application/catalog.repository';
 import { MONIME_CLIENT, type MonimeClient, MonimeError } from '../../integrations/monime/monime.port';
 import { PaymentEvaluator } from './payment-evaluator';
-import { PAYMENT_REPOSITORY, type PaymentRecord, type PaymentRepository } from './payment.repository';
+import { type CollectionMethod, PAYMENT_REPOSITORY, type PaymentRecord, type PaymentRepository } from './payment.repository';
 
 export interface InitiatePaymentInput {
   clientId: string;
@@ -23,8 +23,10 @@ export interface InitiatePaymentInput {
    * PAYMENT_CODE (default): we create a Monime payment code after commit.
    * USSD_FLOW: the USSD flow's collect_payment template collects in-session;
    * we only record the PENDING payment (the hold) and return.
+   * DASH_SHEET: the dot asks Dash's payment sheet for it (reference = our payment
+   * id); likewise we only record the PENDING payment.
    */
-  collection?: 'PAYMENT_CODE' | 'USSD_FLOW';
+  collection?: CollectionMethod;
 }
 
 /**
@@ -90,15 +92,18 @@ export class InitiatePaymentUseCase {
       }
       throw err;
     }
-    if (payment.collectionMethod === 'USSD_FLOW') return this.payments.update(payment.id, { status: 'PENDING' });
+    if (payment.collectionMethod !== 'PAYMENT_CODE') return this.payments.update(payment.id, { status: 'PENDING' });
     return this.startCollection(payment);
   }
 
   private async replay(p: PaymentRecord, input: InitiatePaymentInput, now: Date): Promise<PaymentRecord> {
-    if (p.obligationId !== input.obligationId || p.amount !== input.amount || p.channel !== input.channel) {
+    if (
+      p.obligationId !== input.obligationId || p.amount !== input.amount || p.channel !== input.channel ||
+      p.collectionMethod !== (input.collection ?? 'PAYMENT_CODE')
+    ) {
       throw new DomainError('IDEMPOTENCY_CONFLICT', 'Idempotency key was used for a different payment');
     }
-    if (p.collectionMethod === 'USSD_FLOW') return p;
+    if (p.collectionMethod !== 'PAYMENT_CODE') return p;
     if (p.status === 'INITIATED' && !p.monimeRef && p.expiresAt > now) return this.startCollection(p);
     return p;
   }

@@ -3,6 +3,9 @@ import type { Db } from '../../../shared/infrastructure/prisma.service';
 import type { Channel } from '../../catalog/application/catalog.repository';
 import type { PaymentStatus } from '../domain/payment-status';
 
+/** PAYMENT_CODE: we create a Monime payment code; USSD_FLOW / DASH_SHEET: the channel collects in-session. */
+export type CollectionMethod = 'PAYMENT_CODE' | 'USSD_FLOW' | 'DASH_SHEET';
+
 export const PAYMENT_REPOSITORY = Symbol('PaymentRepository');
 
 export interface PaymentRecord {
@@ -17,7 +20,7 @@ export interface PaymentRecord {
   /** number that actually paid (full, or Monime's masked one); null until known */
   payerPhone: string | null;
   phoneAuthorized: boolean;
-  collectionMethod: 'PAYMENT_CODE' | 'USSD_FLOW';
+  collectionMethod: CollectionMethod;
   status: PaymentStatus;
   monimeRef: string | null;
   ussdCode: string | null;
@@ -41,7 +44,7 @@ export interface NewPayment {
   idempotencyKey: string;
   payerPhone: string | null;
   phoneAuthorized: boolean;
-  collectionMethod: 'PAYMENT_CODE' | 'USSD_FLOW';
+  collectionMethod: CollectionMethod;
   pricingConfigId: string;
   monimeFee: Minor;
   platformFee: Minor;
