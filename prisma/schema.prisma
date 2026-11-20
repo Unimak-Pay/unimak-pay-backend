@@ -126,17 +126,19 @@ model RateRule {
   @@index([feeId])
 }
 
+/// Minimum instalment for one department's payers (overrides Fee.defaultMinInstalment).
 model InstalmentRule {
   id            String   @id @default(uuid()) @db.Uuid
   feeId         String   @db.Uuid
-  programCode   String
+  /// Department.code
+  department    String
   minInstalment BigInt
   updatedBy     String
   updatedAt     DateTime @updatedAt
 
   fee Fee @relation(fields: [feeId], references: [id])
 
-  @@unique([feeId, programCode])
+  @@unique([feeId, department])
 }
 
 model EligibilityRule {
@@ -449,6 +451,39 @@ model Payout {
   @@index([financialAccountId, status])
 }
 
+// ───────────────────────────── Faculties & departments ─────────────────────────────
+
+/// A faculty (or a grouping such as Postgraduate Studies). Codes never change.
+model Faculty {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  departments Department[]
+}
+
+/// A department. `code` is what the portal sends as the payer's department and
+/// what rules, heads of department and payer snapshots store (as text).
+model Department {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique
+  name        String
+  /// null only while it needs review
+  facultyId   String?  @db.Uuid
+  active      Boolean  @default(true)
+  /// Seen from the portal but not set up by an admin yet (name = code, no faculty)
+  needsReview Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  faculty Faculty? @relation(fields: [facultyId], references: [id])
+
+  @@index([facultyId])
+}
+
 // ───────────────────────────── Admin users & audit ─────────────────────────────
 
 enum AdminRole {
@@ -456,6 +491,7 @@ enum AdminRole {
   BURSAR
   FINANCE_OFFICER
   HEAD_OF_DEPARTMENT
+  DEAN
   AUDITOR
 }
 
@@ -470,8 +506,10 @@ model AdminUser {
   role             AdminRole
   /// granted on top of the role's bundle (e.g. instalments.manage)
   extraPermissions String[]  @default([])
-  /// HEAD_OF_DEPARTMENT scope
+  /// HEAD_OF_DEPARTMENT scope (Department.code)
   departments      String[]  @default([])
+  /// DEAN scope (Faculty.code): every department of these faculties
+  faculties        String[]  @default([])
   active           Boolean   @default(true)
   lastLoginAt      DateTime?
   createdBy        String?

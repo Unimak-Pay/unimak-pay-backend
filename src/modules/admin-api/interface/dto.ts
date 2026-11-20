@@ -2,7 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
 import { PERMISSIONS } from '../../auth/domain/permissions';
 
-const ROLES = ['SUPER_ADMIN', 'BURSAR', 'FINANCE_OFFICER', 'HEAD_OF_DEPARTMENT', 'AUDITOR'] as const;
+const ROLES = ['SUPER_ADMIN', 'BURSAR', 'FINANCE_OFFICER', 'HEAD_OF_DEPARTMENT', 'DEAN', 'AUDITOR'] as const;
 const toDigits = ({ value }: { value: unknown }): unknown => (typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : value);
 
 /** Sort: a field, `-field` for descending. Ties break on id, so cursors stay stable. */
@@ -41,6 +41,14 @@ export class PaymentsQuery extends PageQuery {
   @IsOptional() @IsISO8601()
   to?: string;
 
+  /** Department.code */
+  @IsOptional() @IsString() @Length(1, 40)
+  department?: string;
+
+  /** Faculty.code: its departments as they are now */
+  @IsOptional() @IsString() @Length(1, 40)
+  faculty?: string;
+
   @IsOptional() @IsIn(SORTS)
   sort?: Sort;
 }
@@ -67,6 +75,14 @@ export class PaymentsExportQuery {
 
   @IsOptional() @IsISO8601()
   to?: string;
+
+  /** Department.code */
+  @IsOptional() @IsString() @Length(1, 40)
+  department?: string;
+
+  /** Faculty.code: its departments as they are now */
+  @IsOptional() @IsString() @Length(1, 40)
+  faculty?: string;
 }
 
 export class ReportsSummaryQueryDto {
@@ -83,6 +99,14 @@ export class ReportsSummaryQueryDto {
 
   @IsOptional() @IsIn(['USSD', 'DOTS'])
   channel?: 'USSD' | 'DOTS';
+
+  /** Department.code */
+  @IsOptional() @IsString() @Length(1, 40)
+  department?: string;
+
+  /** Faculty.code: its departments as they are now */
+  @IsOptional() @IsString() @Length(1, 40)
+  faculty?: string;
 }
 
 export class PayoutsQuery extends PageQuery {
@@ -162,6 +186,10 @@ export class CreateAdminUserDto {
 
   @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @Length(1, 50, { each: true })
   departments?: string[];
+
+  /** DEAN: Faculty codes */
+  @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @Length(1, 50, { each: true })
+  faculties?: string[];
 }
 
 export class UpdateAdminUserDto {
@@ -176,6 +204,9 @@ export class UpdateAdminUserDto {
 
   @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @Length(1, 50, { each: true })
   departments?: string[];
+
+  @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @Length(1, 50, { each: true })
+  faculties?: string[];
 
   @IsOptional() @IsBoolean()
   active?: boolean;
@@ -215,4 +246,61 @@ export class RunReconciliationDto {
 export class ResolveEventDto {
   @IsString() @Length(3, 500)
   resolution!: string;
+}
+
+// ── Faculties & departments ─────────────────────────────────────────────────
+
+const CODE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
+const optionalBool = ({ value }: { value: unknown }): unknown => (value === 'true' ? true : value === 'false' ? false : value);
+
+export class CreateFacultyDto {
+  /** Never changes; must match what the portal sends */
+  @IsString() @Matches(CODE)
+  code!: string;
+
+  @IsString() @Length(1, 120)
+  name!: string;
+}
+
+export class UpdateFacultyDto {
+  @IsOptional() @IsString() @Length(1, 120)
+  name?: string;
+
+  @IsOptional() @IsBoolean()
+  active?: boolean;
+}
+
+export class CreateDepartmentDto {
+  /** Never changes; must match the department code the portal sends */
+  @IsString() @Matches(CODE)
+  code!: string;
+
+  @IsString() @Length(1, 120)
+  name!: string;
+
+  @IsString() @Length(1, 40)
+  facultyCode!: string;
+}
+
+export class UpdateDepartmentDto {
+  @IsOptional() @IsString() @Length(1, 120)
+  name?: string;
+
+  /** Moves it (and marks a department that needs review as reviewed) */
+  @IsOptional() @IsString() @Length(1, 40)
+  facultyCode?: string;
+
+  @IsOptional() @IsBoolean()
+  active?: boolean;
+}
+
+export class DepartmentsQuery {
+  @IsOptional() @IsString() @Length(1, 40)
+  faculty?: string;
+
+  @IsOptional() @Transform(optionalBool) @IsBoolean()
+  needsReview?: boolean;
+
+  @IsOptional() @Transform(optionalBool) @IsBoolean()
+  active?: boolean;
 }

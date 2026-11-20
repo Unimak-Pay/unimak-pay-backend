@@ -41,7 +41,7 @@ describe('application fee: once per application ref', () => {
 });
 
 describe('planObligations', () => {
-  const student: PayerProfile = { kind: 'STUDENT', programCode: 'BSC-CS', department: 'COMPUTING', level: 2, residency: 'LOCAL', intake: '2025-SEP', finalYear: false };
+  const student: PayerProfile = { kind: 'STUDENT', programCode: 'BSC-CS', department: 'COMPUTER-SCI', level: 2, residency: 'LOCAL', intake: '2025-SEP', finalYear: false };
 
   it('skips other payer kinds, inactive fees and ineligible payers', () => {
     const fees = [

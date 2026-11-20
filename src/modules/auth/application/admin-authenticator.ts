@@ -74,12 +74,18 @@ export class AdminAuthenticator {
       await this.prisma.adminUser.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     }
     const scoped = isDepartmentScoped(user.role);
+    const dean = user.role === 'DEAN';
+    // A dean's departments are looked up on every request, so moving a department between faculties applies at once.
+    const departments = !scoped ? [] : dean
+      ? (await this.prisma.department.findMany({ where: { faculty: { code: { in: user.faculties } } }, select: { code: true }, orderBy: { code: 'asc' } })).map((d) => d.code)
+      : user.departments;
     return {
       id: user.id,
       email: user.email,
       role: user.role,
       permissions: effectivePermissions(user.role, user.extraPermissions),
-      departments: scoped ? user.departments : [],
+      departments,
+      faculties: dean ? user.faculties : [],
       departmentScoped: scoped,
       aal,
     };

@@ -68,6 +68,8 @@ export interface LockedObligation {
   /** phone on the portal record */
   payerPortalPhone: string;
   programCode: string;
+  /** payer's department: minimum instalments are per department */
+  department: string | null;
 }
 
 export interface PaymentRepository {

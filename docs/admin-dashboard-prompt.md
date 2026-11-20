@@ -20,7 +20,7 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
     - First time: `auth.mfa.enroll({ factorType: 'totp' })`, show the QR code and the secret, then `challengeAndVerify`.
     - Every later sign-in: `challengeAndVerify` with the 6-digit code.
     - Use `auth.mfa.getAuthenticatorAssuranceLevel()` to route the user to the code step.
-  - After sign-in call `GET /v1/admin/me`. It returns `{ id, email, role, permissions, departments, departmentScoped, aal }`, and the first call also binds the invitation.
+  - After sign-in call `GET /v1/admin/me`. It returns `{ id, email, role, permissions, departments, faculties, departmentScoped, aal }`, and the first call also binds the invitation.
     - `403 FORBIDDEN` "Not an active UNIMAK admin": show "Your account is not an admin. Ask a super admin to invite you." and sign out.
   - Token refresh: let supabase-js handle it. Retry a request once after a 401 with a refreshed session.
 - **CORS: the backend sends no CORS headers.** The browser must **not** call the backend directly. Add a server-side proxy route, e.g. Next.js `app/api/unimak/[...path]/route.ts`:
@@ -41,15 +41,18 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
     - `UPSTREAM_UNAVAILABLE`: "Monime is unavailable, try again".
   - Validation errors: `{ statusCode, message: string | string[], error }`.
 - **Permissions:** gate every page, button and action on `me.permissions`, using the `x-permission` of the operation it calls. Hide navigation the user can't use, and disable actions with a tooltip saying which permission is missing. The server enforces permissions anyway; the UI just shouldn't offer what will fail.
-  - `HEAD_OF_DEPARTMENT` sees only their departments' payments (the server filters them). Show their departments in the header.
+  - `HEAD_OF_DEPARTMENT` and `DEAN` (`departmentScoped: true`) see only their departments' payments (the server filters them). Show their departments (and a dean's faculties) in the header, by name.
 
 | Role | Gets |
 |---|---|
 | SUPER_ADMIN | everything, incl. users, payouts, account provisioning (2FA) |
-| BURSAR | fee setup, instalments, payments + reconcile, reconciliation, transfer/outbox retries; read accounts/payouts (2FA) |
-| FINANCE_OFFICER | read payments, accounts, payouts, transfers, reconciliation |
+| BURSAR | fee setup, instalments, payments + reconcile, reconciliation, outbox retries; read accounts/payouts (2FA) |
+| FINANCE_OFFICER | read payments, accounts, payouts, reconciliation |
 | HEAD_OF_DEPARTMENT | read fees and their departments' payments |
-| AUDITOR | every `*.read`, incl. the audit log |
+| DEAN | read fees and the payments of every department in their faculties |
+| AUDITOR | every `*.read` except commission transfers, incl. the audit log |
+
+**Commission transfers are super-admin only** unless `transfers.read` / `transfers.retry` is granted on its own. Hide the Commission transfers screen, the payment detail's commission transfer, the reconciliation transfer sections (they come back `null`) and the report's commission card (`null`) without `transfers.read`. Commission-transfer outbox messages are already filtered out by the server.
 
 ## Domain you need to know
 
@@ -57,7 +60,8 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
 - A **fee** is a fee type for a period (`2026/27` or an intake like `2026-SEP`), with lifecycle DRAFT → ACTIVE → CLOSED (CLOSED → ACTIVE is allowed).
   - **Rate rules** set the price by matchers (programCode, department, level, residency, intake; omitted = any). The most specific rule wins, and ambiguous ties are refused.
   - **Eligibility rules:** none = everyone of the payer kind; otherwise the payer must match one.
-  - **Instalment rules:** minimum instalment per program; otherwise the fee default.
+  - **Instalment rules:** minimum instalment per **department**; otherwise the fee default.
+- **Faculties → departments** (`GET /v1/admin/faculties`, `GET /v1/admin/departments`): the reference list. Department codes are what the portal sends for each payer (students and applicants) and what rules and heads of department use. Codes never change; nothing is deleted (deactivate). A department the portal sends that isn't listed appears with `needsReview: true` and no faculty.
 - **Payments** come from two channels: USSD (Monime USSD flow) and DOTS (Dash Dots app). Statuses: INITIATED, PENDING, COMPLETED, FAILED, EXPIRED.
   - An open payment past `expiresAt` is expired automatically. A late Monime completion is still applied ("late settlement"), so EXPIRED is not final for money.
   - Each payment has an 8-digit **paymentRef** (what payers quote), Monime's **orderNumber** (in Monime's SMS), a Monime payment id `spm-…`, a receipt number `UNIMAK-YYYY-NNNNNN`, and the split `monimeFee` / `platformFee` / `netAmount`.
@@ -74,17 +78,17 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
    - needs-attention counts from `GET /v1/admin/reconciliation` (`counts`: openItems, webhookEvents, failedTransfers, stuckTransfers, stuckPayouts, failedPayouts, deadOutbox, staleOpenPayments, plus `lastRun`), each linking to its list;
    - account balances from `GET /v1/admin/financial-accounts`;
    - the latest payments from `GET /v1/admin/payments?limit=10`.
-   - **Collections** from `GET /v1/admin/reports/summary?from=&to=&feeType=&channel=` (`reports.read`), with a date-range picker (default last 30 days, at most 366) and fee type / channel filters kept in the URL. It shows:
+   - **Collections** from `GET /v1/admin/reports/summary?from=&to=&feeType=&channel=&faculty=&department=` (`reports.read`), with a date-range picker (default last 30 days, at most 366) and fee type / channel / faculty / department filters kept in the URL. It shows:
      - KPI cards from `collected` (amount, count, average, net after fees, platform commission, late settlements);
      - a daily collections chart from `byDay`, which is already zero-filled;
-     - breakdowns from `byFeeType` and `byChannel`;
+     - breakdowns from `byFeeType`, `byChannel`, `byFaculty` and `byDepartment` (`facultyCode: null` = "No faculty yet"; clicking a faculty sets the faculty filter);
      - the payment funnel from `payments` (started → completed / pending / failed / expired, `completionRate`);
      - commission (`commission`) and payouts (`payouts`), each shown only when not `null`.
    - Never compute totals by paging through payments.
 
 3. **Payments**:
-   - list (`GET /v1/admin/payments`) with filters status, channel, feeType, payerRef, from/to, and a search box bound to `ref`. The search takes a paymentRef, a Monime order number or an `spm-…` id, whatever a payer or Monime support quotes;
-   - detail (`GET /v1/admin/payments/{id}`): payer, fee, amounts and split, status timeline (created, expires, completed), Monime ids, receipt number, ledger entry, commission transfer;
+   - list (`GET /v1/admin/payments`) with filters status, channel, feeType, faculty, department, payerRef, from/to, and a search box bound to `ref`. The search takes a paymentRef, a Monime order number or an `spm-…` id, whatever a payer or Monime support quotes;
+   - detail (`GET /v1/admin/payments/{id}`): payer (with department and faculty names: `payer.departmentName`, `payer.facultyName`), fee, amounts and split, status timeline (created, expires, completed), Monime ids, receipt number, ledger entry, commission transfer (only with `transfers.read`; otherwise `null`);
    - **Export CSV** (`GET /v1/admin/payments/export.csv` with the current filters, `payments.export`). Download it via the proxy (the response is a file, not JSON). A 400 says to narrow the filters (the limit is 50,000 rows).
    - action **"Check with Monime"** (`POST /v1/admin/payments/{id}/reconcile`, `payments.reconcile`) for open payments; it shows before → after.
 
@@ -97,7 +101,8 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
      - detail (`GET /v1/admin/fees/{id}`) with tabs for rate rules, eligibility and instalments;
      - edit and status changes (`PATCH`); show the server's reason when activation is refused (it needs a rate rule and an account).
    - **Rate rules:** a table editor (`POST`, `PUT /{ruleId}`, `DELETE`). Show `AMBIGUOUS_RATE_RULE` messages inline next to the rule.
-   - **Eligibility rules** (`POST` / `DELETE`). **Minimum instalment per program** (`PUT` / `DELETE /instalment-rules/{programCode}`; needs `instalments.manage`).
+   - **Eligibility rules** (`POST` / `DELETE`). **Minimum instalment per department** (`PUT` / `DELETE /instalment-rules/{department}`; needs `instalments.manage`).
+   - Every department field in these forms is a **dropdown** of active, reviewed departments grouped by faculty (from `GET /v1/admin/faculties`), never free text. The server rejects anything else with 400.
    - **Preview:** "What would this payer owe?" (`GET /v1/admin/fees/{id}/preview?kind=student|applicant&ref=`) shows eligible, amount, minInstalment and reason.
 
 5. **Treasury**:
@@ -117,12 +122,20 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
    - items across runs (`GET /items?status=&runId=&kind=`); resolve one (`POST /items/{id}/resolve {resolution}`, with a required note);
    - webhook events list without payloads (`GET /webhook-events?status=&type=&unresolved=`; the cursor is the Monime event id), a viewer with the raw JSON payload (`GET /webhook-events/{id}`), plus **Resolve** (with a note) and **Replay** (FAILED only).
 
-7. **Users** (`users.manage`): list, detail (`GET /v1/admin/users/{id}`), invite (`POST /v1/admin/users`: email, name, role, extraPermissions, departments for HEAD_OF_DEPARTMENT), and edit/deactivate (`PATCH`).
+7. **Users** (`users.manage`): list, detail (`GET /v1/admin/users/{id}`), invite (`POST /v1/admin/users`: email, name, role, extraPermissions, `departments` for HEAD_OF_DEPARTMENT, `faculties` for DEAN — both multi-select dropdowns), and edit/deactivate (`PATCH`).
    - After inviting, show `invitation.status`: `SENT` "Invite email sent to …"; `ALREADY_REGISTERED` "They already have a sign-in and can sign in now"; `NOT_CONFIGURED` / `FAILED` show `invitation.message` as a warning (the admin was still created).
    - Users with `authUserId: null` are "Invited — not signed in yet": offer "Re-send invite" (`POST /v1/admin/users/{id}/invite`; 409 once they've signed in).
    - The server refuses granting what you don't have, deactivating yourself and removing the last super admin. Show its message.
 
-8. **Audit log** (`audit.read`): `GET /v1/admin/audit-log?entity=&entityId=&actorId=`, with before/after JSON diffs. Link to it from detail pages ("History"), filtered by `entity` and `entityId`.
+8. **Faculties & departments** (read: any admin; change: `academics.manage`):
+   - faculties with their departments (`GET /v1/admin/faculties`), showing inactive ones greyed out;
+   - add a faculty (`POST /faculties {code, name}`), rename / deactivate (`PATCH /faculties/{code}`);
+   - add a department (`POST /departments {code, name, facultyCode}`), rename / move to another faculty / deactivate (`PATCH /departments/{code}`);
+   - codes can't be edited after creation: say so on the form ("must match the portal's code");
+   - a **Needs review** list (`GET /departments?needsReview=true`) with a badge in the navigation when it isn't empty: set a name and faculty to mark it reviewed;
+   - 409 messages (still used by rules or heads of department, faculty has active departments or deans) are shown as they come.
+
+9. **Audit log** (`audit.read`): `GET /v1/admin/audit-log?entity=&entityId=&actorId=`, with before/after JSON diffs. Link to it from detail pages ("History"), filtered by `entity` and `entityId`.
 
 ## Safety rules (money is real)
 

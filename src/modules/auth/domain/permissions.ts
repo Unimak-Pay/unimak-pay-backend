@@ -27,17 +27,22 @@ export const PERMISSIONS = [
   'audit.read',
   'users.manage',
   'settings.manage',
+  'academics.manage',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
-export type AdminRole = 'SUPER_ADMIN' | 'BURSAR' | 'FINANCE_OFFICER' | 'HEAD_OF_DEPARTMENT' | 'AUDITOR';
+export type AdminRole = 'SUPER_ADMIN' | 'BURSAR' | 'FINANCE_OFFICER' | 'HEAD_OF_DEPARTMENT' | 'DEAN' | 'AUDITOR';
 
-const READ_ALL = PERMISSIONS.filter((p) => p.endsWith('.read'));
+/** Commission transfers (UNIMAK's share moving to the platform): super admins, or granted on their own. */
+export const COMMISSION_PERMISSION: Permission = 'transfers.read';
+
+const READ_ALL = PERMISSIONS.filter((p) => p.endsWith('.read') && p !== COMMISSION_PERMISSION);
 
 /**
  * From the spec's role table. Money-out (payouts.manage) and account
  * provisioning (accounts.manage) are super-admin only by default; grant them
- * individually if the bursar should have them.
+ * individually if the bursar should have them. So is seeing commission
+ * transfers (transfers.read, transfers.retry).
  */
 export const ROLE_PERMISSIONS: Record<AdminRole, readonly Permission[]> = {
   SUPER_ADMIN: PERMISSIONS,
@@ -46,15 +51,16 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly Permission[]> = {
     'payers.read', 'payers.adjust',
     'payments.read', 'payments.export', 'payments.refund', 'payments.reconcile',
     'receipts.resend',
-    'accounts.read', 'payouts.read', 'transfers.read', 'transfers.retry',
+    'accounts.read', 'payouts.read',
     'reconciliation.read', 'reconciliation.manage', 'outbox.read', 'outbox.retry',
     'reports.read',
   ],
   FINANCE_OFFICER: [
     'payers.read', 'payments.read', 'payments.export', 'receipts.resend',
-    'accounts.read', 'payouts.read', 'transfers.read', 'reconciliation.read', 'reports.read',
+    'accounts.read', 'payouts.read', 'reconciliation.read', 'reports.read',
   ],
   HEAD_OF_DEPARTMENT: ['fees.read', 'payers.read', 'payments.read', 'reports.read'],
+  DEAN: ['fees.read', 'payers.read', 'payments.read', 'reports.read'],
   AUDITOR: READ_ALL,
 };
 
@@ -69,7 +75,7 @@ export function effectivePermissions(role: AdminRole, extra: readonly string[]):
   return new Set<Permission>([...ROLE_PERMISSIONS[role], ...extra.filter(isPermission)]);
 }
 
-/** Heads of department only see their departments' payers and payments. */
+/** Heads of department see their departments' payers and payments; deans every department of their faculties. */
 export function isDepartmentScoped(role: AdminRole): boolean {
-  return role === 'HEAD_OF_DEPARTMENT';
+  return role === 'HEAD_OF_DEPARTMENT' || role === 'DEAN';
 }

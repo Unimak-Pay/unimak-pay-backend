@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DomainError } from '../../../shared/domain/errors';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
+import { AcademicsService } from '../../academics/application/academics.service';
 import { CATALOG_REPOSITORY, type CatalogRepository } from '../../catalog/application/catalog.repository';
 import type { PayerKind } from '../../catalog/domain/payer-profile';
 import { LEDGER_REPOSITORY, type LedgerRepository } from '../../ledger/application/ledger.repository';
@@ -27,6 +28,7 @@ export class LookupPayerUseCase {
   constructor(
     private readonly prisma: PrismaService,
     private readonly directory: PayerDirectory,
+    private readonly academics: AcademicsService,
     @Inject(PAYER_REPOSITORY) private readonly payers: PayerRepository,
     @Inject(CATALOG_REPOSITORY) private readonly catalog: CatalogRepository,
     @Inject(LEDGER_REPOSITORY) private readonly ledger: LedgerRepository,
@@ -37,6 +39,7 @@ export class LookupPayerUseCase {
     let stale = false;
     try {
       payer = await this.payers.upsertSnapshot(await this.directory.fetch(kind, ref), now);
+      await this.academics.registerSeen(payer.department); // never throws
     } catch (err) {
       // Portal down: serve the last snapshot rather than blocking a payment.
       const cached = err instanceof DomainError && err.code === 'UPSTREAM_UNAVAILABLE'

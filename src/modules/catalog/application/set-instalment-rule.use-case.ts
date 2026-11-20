@@ -15,7 +15,7 @@ export class SetInstalmentRuleUseCase {
 
   async execute(
     actor: Actor,
-    input: { feeId: string; programCode: string; minInstalment: Minor },
+    input: { feeId: string; department: string; minInstalment: Minor },
   ): Promise<void> {
     assertCanManageInstalments(actor.permissions);
     if (input.minInstalment <= 0n) throw new DomainError('VALIDATION', 'Must be positive');
@@ -26,7 +26,7 @@ export class SetInstalmentRuleUseCase {
     }
     await this.catalog.upsertInstalmentRule(
       input.feeId,
-      input.programCode,
+      input.department,
       input.minInstalment,
       actor.id,
     );

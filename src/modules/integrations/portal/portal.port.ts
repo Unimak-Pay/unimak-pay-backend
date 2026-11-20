@@ -8,6 +8,8 @@ export interface PortalApplicant {
   fullName: string;
   phone: string;
   programCode: string;
+  /** Department.code of the department applied to */
+  department: string;
   intake: string;
   residency: Residency;
   status: 'APPLIED' | 'ADMITTED' | 'REJECTED';

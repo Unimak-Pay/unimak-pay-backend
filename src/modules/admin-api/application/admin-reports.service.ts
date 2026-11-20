@@ -16,6 +16,10 @@ export interface ReportsSummaryQuery {
   to?: string;
   feeType?: string;
   channel?: 'USSD' | 'DOTS';
+  /** Department.code */
+  department?: string;
+  /** Faculty.code: its departments as they are now */
+  faculty?: string;
 }
 
 interface Bucket { amount: bigint; count: number }
@@ -24,7 +28,7 @@ interface Bucket { amount: bigint; count: number }
  * Collection totals for the dashboard. Money collected = COMPLETED payments by
  * completedAt (a late settlement counts on the day Monime completed it).
  * Payment funnel = payments *created* in the range, by current status (open past
- * expiry counts as expired). Heads of department only see their departments;
+ * expiry counts as expired). Heads of department and deans only see their departments;
  * commission and payout sections need transfers.read / payouts.read and are
  * never department-scoped, so they're null otherwise.
  */
@@ -40,6 +44,8 @@ export class AdminReportsService {
         Prisma.sql`TRUE`,
         q.feeType ? Prisma.sql`ft.code = ${q.feeType}` : null,
         q.channel ? Prisma.sql`p.channel = ${q.channel}::"Channel"` : null,
+        q.department ? Prisma.sql`py.department = ${q.department}` : null,
+        q.faculty ? Prisma.sql`py.department IN (SELECT d2.code FROM "Department" d2 JOIN "Faculty" f2 ON f2.id = d2."facultyId" WHERE f2.code = ${q.faculty})` : null,
         admin.departmentScoped ? Prisma.sql`py.department IN (${Prisma.join(admin.departments.length ? [...admin.departments] : [''])})` : null,
       ].filter((x): x is Prisma.Sql => x !== null),
       ' AND ',
@@ -48,10 +54,12 @@ export class AdminReportsService {
       JOIN "Obligation" o ON o.id = p."obligationId"
       JOIN "Fee" f ON f.id = o."feeId"
       JOIN "FeeType" ft ON ft.id = f."feeTypeId"
-      JOIN "Payer" py ON py.id = o."payerId"`;
+      JOIN "Payer" py ON py.id = o."payerId"
+      LEFT JOIN "Department" d ON d.code = py.department
+      LEFT JOIN "Faculty" fa ON fa.id = d."facultyId"`;
     const completed = Prisma.sql`p.status = 'COMPLETED' AND p."completedAt" >= ${start} AND p."completedAt" < ${end} AND ${where}`;
 
-    const [totals, byDay, byFeeType, byChannel, funnel] = await Promise.all([
+    const [totals, byDay, byFeeType, byChannel, funnel, byFaculty, byDepartment] = await Promise.all([
       this.prisma.$queryRaw<{ amount: bigint; count: number; monime: bigint; platform: bigint; net: bigint; late: number }[]>`
         SELECT COALESCE(SUM(p.amount), 0)::bigint AS amount, COUNT(*)::int AS count,
                COALESCE(SUM(p."monimeFee"), 0)::bigint AS monime, COALESCE(SUM(p."platformFee"), 0)::bigint AS platform,
@@ -73,6 +81,13 @@ export class AdminReportsService {
         SELECT CASE WHEN p.status IN ('INITIATED', 'PENDING') AND p."expiresAt" <= ${now} THEN 'EXPIRED' ELSE p.status::text END AS status,
                COUNT(*)::int AS count, SUM(p.amount)::bigint AS amount
         ${from_} WHERE p."createdAt" >= ${start} AND p."createdAt" < ${end} AND ${where} GROUP BY 1`,
+      // grouped by each department's current faculty
+      this.prisma.$queryRaw<{ code: string | null; name: string | null; amount: bigint; count: number }[]>`
+        SELECT fa.code, fa.name, SUM(p.amount)::bigint AS amount, COUNT(*)::int AS count
+        ${from_} WHERE ${completed} GROUP BY fa.code, fa.name ORDER BY 3 DESC, 1 NULLS LAST`,
+      this.prisma.$queryRaw<{ code: string | null; name: string | null; faculty: string | null; amount: bigint; count: number }[]>`
+        SELECT py.department AS code, d.name, fa.code AS faculty, SUM(p.amount)::bigint AS amount, COUNT(*)::int AS count
+        ${from_} WHERE ${completed} GROUP BY py.department, d.name, fa.code ORDER BY 4 DESC, 1 NULLS LAST`,
     ]);
 
     const t = totals[0]!;
@@ -86,7 +101,7 @@ export class AdminReportsService {
 
     return {
       range: { from, to, days, timezone: 'Africa/Freetown (UTC)' },
-      filters: { feeType: q.feeType ?? null, channel: q.channel ?? null, departments: admin.departmentScoped ? [...admin.departments] : null },
+      filters: { feeType: q.feeType ?? null, channel: q.channel ?? null, department: q.department ?? null, faculty: q.faculty ?? null, departments: admin.departmentScoped ? [...admin.departments] : null },
       collected: {
         amount: t.amount,
         count: t.count,
@@ -102,6 +117,9 @@ export class AdminReportsService {
         return { date: day, amount: d?.amount ?? 0n, count: d?.count ?? 0 };
       }),
       byFeeType: byFeeType.map((r) => ({ feeTypeCode: r.code, feeTypeName: r.name, amount: r.amount, count: r.count, platformFees: r.platform, net: r.net })),
+      /** facultyCode null: departments without a faculty (needing review) or payers without a department */
+      byFaculty: byFaculty.map((r) => ({ facultyCode: r.code, facultyName: r.name, amount: r.amount, count: r.count })),
+      byDepartment: byDepartment.map((r) => ({ department: r.code, departmentName: r.name, facultyCode: r.faculty, amount: r.amount, count: r.count })),
       byChannel: (['USSD', 'DOTS'] as const)
         .filter((c) => !q.channel || q.channel === c)
         .map((c) => {

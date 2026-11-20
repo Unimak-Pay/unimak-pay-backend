@@ -1,12 +1,12 @@
 [
-  { "studentId": "UNI-2026-0001", "fullName": "Abdul Koroma", "phone": "+23276200001", "programCode": "BSC-CS", "department": "COMPUTING", "level": 1, "finalYear": false, "residency": "LOCAL", "intake": "2026-SEP" },
-  { "studentId": "UNI-2025-0002", "fullName": "Mariama Jalloh", "phone": "+23277200002", "programCode": "BSC-CS", "department": "COMPUTING", "level": 2, "finalYear": false, "residency": "LOCAL", "intake": "2025-SEP" },
-  { "studentId": "UNI-2025-0003", "fullName": "Chinedu Okafor", "phone": "+23278200003", "programCode": "BSC-CS", "department": "COMPUTING", "level": 2, "finalYear": false, "residency": "INTERNATIONAL", "intake": "2025-SEP" },
-  { "studentId": "UNI-2023-0004", "fullName": "Hawa Turay", "phone": "+23279200004", "programCode": "BSC-CS", "department": "COMPUTING", "level": 4, "finalYear": true, "residency": "LOCAL", "intake": "2023-SEP" },
-  { "studentId": "UNI-2026-0005", "fullName": "Ibrahim Kargbo", "phone": "+23230200005", "programCode": "BSC-NUR", "department": "HEALTH", "level": 1, "finalYear": false, "residency": "LOCAL", "intake": "2026-SEP" },
-  { "studentId": "UNI-2024-0006", "fullName": "Kadiatu Mansaray", "phone": "+23233200006", "programCode": "BSC-NUR", "department": "HEALTH", "level": 3, "finalYear": false, "residency": "LOCAL", "intake": "2024-SEP" },
-  { "studentId": "UNI-2024-0007", "fullName": "Ama Owusu", "phone": "+23234200007", "programCode": "BSC-NUR", "department": "HEALTH", "level": 3, "finalYear": false, "residency": "INTERNATIONAL", "intake": "2024-SEP" },
-  { "studentId": "UNI-2026-0008", "fullName": "Alusine Fofanah", "phone": "+23288200008", "programCode": "BSC-IT", "department": "COMPUTING", "level": 1, "finalYear": false, "residency": "LOCAL", "intake": "2026-SEP" },
-  { "studentId": "UNI-2025-0009", "fullName": "Zainab Sankoh", "phone": "+23299200009", "programCode": "BSC-IT", "department": "COMPUTING", "level": 2, "finalYear": false, "residency": "LOCAL", "intake": "2025-SEP" },
-  { "studentId": "UNI-2023-0010", "fullName": "Osman Kanu", "phone": "+23272200010", "programCode": "BSC-IT", "department": "COMPUTING", "level": 4, "finalYear": true, "residency": "LOCAL", "intake": "2023-SEP" }
+  { "studentId": "UNI-2026-0001", "fullName": "Abdul Koroma", "phone": "+23276200001", "programCode": "BSC-CS", "department": "COMPUTER-SCI", "level": 1, "finalYear": false, "residency": "LOCAL", "intake": "2026-SEP" },
+  { "studentId": "UNI-2025-0002", "fullName": "Mariama Jalloh", "phone": "+23277200002", "programCode": "BSC-CS", "department": "COMPUTER-SCI", "level": 2, "finalYear": false, "residency": "LOCAL", "intake": "2025-SEP" },
+  { "studentId": "UNI-2025-0003", "fullName": "Chinedu Okafor", "phone": "+23278200003", "programCode": "BSC-CS", "department": "COMPUTER-SCI", "level": 2, "finalYear": false, "residency": "INTERNATIONAL", "intake": "2025-SEP" },
+  { "studentId": "UNI-2023-0004", "fullName": "Hawa Turay", "phone": "+23279200004", "programCode": "BSC-CS", "department": "COMPUTER-SCI", "level": 4, "finalYear": true, "residency": "LOCAL", "intake": "2023-SEP" },
+  { "studentId": "UNI-2026-0005", "fullName": "Ibrahim Kargbo", "phone": "+23230200005", "programCode": "BSC-NUR", "department": "NURSING", "level": 1, "finalYear": false, "residency": "LOCAL", "intake": "2026-SEP" },
+  { "studentId": "UNI-2024-0006", "fullName": "Kadiatu Mansaray", "phone": "+23233200006", "programCode": "BSC-NUR", "department": "NURSING", "level": 3, "finalYear": false, "residency": "LOCAL", "intake": "2024-SEP" },
+  { "studentId": "UNI-2024-0007", "fullName": "Ama Owusu", "phone": "+23234200007", "programCode": "BSC-NUR", "department": "NURSING", "level": 3, "finalYear": false, "residency": "INTERNATIONAL", "intake": "2024-SEP" },
+  { "studentId": "UNI-2026-0008", "fullName": "Alusine Fofanah", "phone": "+23288200008", "programCode": "BSC-IT", "department": "COMPUTER-SCI", "level": 1, "finalYear": false, "residency": "LOCAL", "intake": "2026-SEP" },
+  { "studentId": "UNI-2025-0009", "fullName": "Zainab Sankoh", "phone": "+23299200009", "programCode": "BSC-IT", "department": "COMPUTER-SCI", "level": 2, "finalYear": false, "residency": "LOCAL", "intake": "2025-SEP" },
+  { "studentId": "UNI-2023-0010", "fullName": "Osman Kanu", "phone": "+23272200010", "programCode": "BSC-IT", "department": "COMPUTER-SCI", "level": 4, "finalYear": true, "residency": "LOCAL", "intake": "2023-SEP" }
 ]

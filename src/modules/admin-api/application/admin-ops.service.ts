@@ -2,8 +2,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { DomainError } from '../../../shared/domain/errors';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
+import { AcademicsService, type DepartmentNames, NO_NAMES } from '../../academics/application/academics.service';
 import { AuditService } from '../../audit/audit.service';
 import type { AdminPrincipal } from '../../auth/application/admin-principal';
+import { COMMISSION_PERMISSION } from '../../auth/domain/permissions';
+import { COMMISSION_OUTBOX_TYPE } from '../../outbox/domain/messages';
 import { MONIME_CLIENT, type MonimeClient } from '../../integrations/monime/monime.port';
 import { OutboxDispatcher } from '../../outbox/application/outbox-dispatcher';
 import { ReconcilePaymentUseCase } from '../../payments/application/reconcile-payment.use-case';
@@ -35,6 +38,16 @@ function orderBy(sort: Sort = '-createdAt'): [{ createdAt: 'asc' | 'desc' } | { 
 const HOUR = 60 * 60_000;
 
 /** Read models and operator actions behind /v1/admin. Every write is audited. */
+/** Commission transfers are only for super admins and holders of transfers.read. */
+function canSeeCommission(admin: AdminPrincipal): boolean {
+  return admin.permissions.has(COMMISSION_PERMISSION);
+}
+
+/** Outbox messages that send commission transfers are hidden from everyone else. */
+function outboxScope(admin: AdminPrincipal): Prisma.OutboxMessageWhereInput {
+  return canSeeCommission(admin) ? {} : { type: { not: COMMISSION_OUTBOX_TYPE } };
+}
+
 @Injectable()
 export class AdminOpsService {
   constructor(
@@ -46,6 +59,7 @@ export class AdminOpsService {
     private readonly receiver: MonimeWebhookReceiver,
     private readonly reconciliation: NightlyReconciliationService,
     @Inject(MONIME_CLIENT) private readonly monime: MonimeClient,
+    private readonly academics: AcademicsService,
   ) {}
 
   // ── Payments ───────────────────────────────────────────────────────────────
@@ -55,7 +69,11 @@ export class AdminOpsService {
     return admin.departmentScoped ? { obligation: { payer: { department: { in: [...admin.departments] } } } } : {};
   }
 
-  paymentsWhere(admin: AdminPrincipal, q: PaymentFilters): Prisma.PaymentWhereInput {
+  async paymentsWhere(admin: AdminPrincipal, q: PaymentFilters): Promise<Prisma.PaymentWhereInput> {
+    // a faculty is its departments as they are now
+    const facultyDepartments = q.faculty
+      ? (await this.prisma.department.findMany({ where: { faculty: { code: q.faculty } }, select: { code: true } })).map((d) => d.code)
+      : null;
     return {
       AND: [
         this.paymentScope(admin),
@@ -63,7 +81,9 @@ export class AdminOpsService {
         q.channel ? { channel: q.channel as never } : {},
         q.feeType ? { obligation: { fee: { feeType: { code: q.feeType } } } } : {},
         q.payerRef ? { obligation: { payer: { ref: q.payerRef } } } : {},
+        q.department ? { obligation: { payer: { department: q.department } } } : {},
         q.ref ? refFilter(q.ref) : {},
+        facultyDepartments ? { obligation: { payer: { department: { in: facultyDepartments } } } } : {},
         q.from || q.to ? { createdAt: { ...(q.from ? { gte: new Date(q.from) } : {}), ...(q.to ? { lt: new Date(q.to) } : {}) } } : {},
       ],
     };
@@ -71,12 +91,13 @@ export class AdminOpsService {
 
   async listPayments(admin: AdminPrincipal, q: PaymentFilters & { limit: number; cursor?: string; sort?: Sort }) {
     const rows = await this.prisma.payment.findMany({
-      where: this.paymentsWhere(admin, q),
+      where: await this.paymentsWhere(admin, q),
       orderBy: orderBy(q.sort),
       include: { obligation: { include: { payer: true, fee: { include: { feeType: true } } } }, receipt: true },
       ...cursorArgs(q.limit, q.cursor),
     });
-    return page(rows.map(presentPayment), q.limit);
+    const names = await this.academics.names(rows.map((r) => r.obligation.payer.department));
+    return page(rows.map((r) => presentPayment(r, names)), q.limit);
   }
 
   /**
@@ -84,7 +105,7 @@ export class AdminOpsService {
    * EXPORT_MAX_ROWS; narrow the filters beyond that). Audited.
    */
   async *exportPayments(admin: AdminPrincipal, q: PaymentFilters): AsyncGenerator<string> {
-    const where = this.paymentsWhere(admin, q);
+    const where = await this.paymentsWhere(admin, q);
     const total = await this.prisma.payment.count({ where });
     if (total > EXPORT_MAX_ROWS) {
       throw new DomainError('VALIDATION', `${total} payments match; exports are limited to ${EXPORT_MAX_ROWS}. Narrow the date range or filters.`);
@@ -100,7 +121,8 @@ export class AdminOpsService {
         take: EXPORT_BATCH,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       });
-      if (rows.length) yield rows.map((r) => `${csvRow(r)}\r\n`).join('');
+      const names = await this.academics.names(rows.map((r) => r.obligation.payer.department));
+      if (rows.length) yield rows.map((r) => `${csvRow(r, names.get(r.obligation.payer.department ?? '') ?? NO_NAMES)}\r\n`).join('');
       if (rows.length < EXPORT_BATCH) return;
       cursor = rows[rows.length - 1]!.id;
     }
@@ -112,8 +134,9 @@ export class AdminOpsService {
       include: { obligation: { include: { payer: true, fee: { include: { feeType: true } } } }, receipt: true, ledgerEntry: true },
     });
     if (!p) throw new DomainError('NOT_FOUND', 'Payment not found');
-    const transfer = await this.prisma.transfer.findUnique({ where: { paymentId: id } });
-    return { ...presentPayment(p), ledgerEntry: p.ledgerEntry, commissionTransfer: transfer };
+    const transfer = canSeeCommission(admin) ? await this.prisma.transfer.findUnique({ where: { paymentId: id } }) : null;
+    const names = await this.academics.names([p.obligation.payer.department]);
+    return { ...presentPayment(p, names), ledgerEntry: p.ledgerEntry, commissionTransfer: transfer };
   }
 
   async reconcilePayment(admin: AdminPrincipal, id: string) {
@@ -193,23 +216,23 @@ export class AdminOpsService {
 
   // ── Outbox ─────────────────────────────────────────────────────────────────
 
-  async listOutbox(q: { limit: number; cursor?: string; status?: string }) {
+  async listOutbox(admin: AdminPrincipal, q: { limit: number; cursor?: string; status?: string }) {
     const rows = await this.prisma.outboxMessage.findMany({
-      where: q.status ? { status: q.status as never } : {},
+      where: { ...(q.status ? { status: q.status as never } : {}), ...outboxScope(admin) },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       ...cursorArgs(q.limit, q.cursor),
     });
     return page(rows, q.limit);
   }
 
-  async getOutbox(id: string) {
-    const m = await this.prisma.outboxMessage.findUnique({ where: { id } });
+  async getOutbox(admin: AdminPrincipal, id: string) {
+    const m = await this.prisma.outboxMessage.findFirst({ where: { id, ...outboxScope(admin) } });
     if (!m) throw new DomainError('NOT_FOUND', 'Outbox message not found');
     return m;
   }
 
   async retryOutbox(admin: AdminPrincipal, id: string) {
-    const before = await this.prisma.outboxMessage.findUnique({ where: { id } });
+    const before = await this.prisma.outboxMessage.findFirst({ where: { id, ...outboxScope(admin) } });
     if (!before) throw new DomainError('NOT_FOUND', 'Outbox message not found');
     if (before.status !== 'DEAD') throw new DomainError('INVALID_STATE', `Only DEAD messages can be retried (is ${before.status})`);
     await this.prisma.$transaction(async (tx) => {
@@ -223,7 +246,8 @@ export class AdminOpsService {
   // ── Reconciliation ─────────────────────────────────────────────────────────
 
   /** Everything that needs a human: one call for the reconciliation screen. */
-  async reconciliationSummary(now = new Date()) {
+  async reconciliationSummary(admin: AdminPrincipal, now = new Date()) {
+    const commission = canSeeCommission(admin);
     const hourAgo = new Date(now.getTime() - HOUR);
     const w = {
       openItems: { status: 'OPEN' } satisfies Prisma.ReconciliationItemWhereInput,
@@ -232,7 +256,7 @@ export class AdminOpsService {
       stuckTransfers: { status: { in: ['PENDING', 'SUBMITTED'] }, createdAt: { lt: hourAgo } } satisfies Prisma.TransferWhereInput,
       stuckPayouts: { status: { in: ['REQUESTED', 'SUBMITTED', 'PROCESSING'] }, createdAt: { lt: hourAgo } } satisfies Prisma.PayoutWhereInput,
       failedPayouts: { status: 'FAILED', updatedAt: { gt: new Date(now.getTime() - 7 * 24 * HOUR) } } satisfies Prisma.PayoutWhereInput,
-      deadOutbox: { status: 'DEAD' } satisfies Prisma.OutboxMessageWhereInput,
+      deadOutbox: { status: 'DEAD', ...outboxScope(admin) } satisfies Prisma.OutboxMessageWhereInput,
       staleOpenPayments: { status: { in: ['INITIATED', 'PENDING'] }, expiresAt: { lt: now } } satisfies Prisma.PaymentWhereInput,
     };
     // Lists show the latest SUMMARY_LIST_LIMIT of each; counts are exact.
@@ -240,8 +264,8 @@ export class AdminOpsService {
     const [openItems, webhookEvents, failedTransfers, stuckTransfers, stuckPayouts, failedPayouts, deadOutbox, staleOpenPayments, counts] = await Promise.all([
       this.prisma.reconciliationItem.findMany({ where: w.openItems, orderBy: { createdAt: 'desc' }, take }),
       this.prisma.webhookEvent.findMany({ where: w.webhookEvents, orderBy: { receivedAt: 'desc' }, take, omit: { payload: true } }),
-      this.prisma.transfer.findMany({ where: w.failedTransfers, orderBy: { updatedAt: 'desc' }, take }),
-      this.prisma.transfer.findMany({ where: w.stuckTransfers, orderBy: { createdAt: 'asc' }, take }),
+      commission ? this.prisma.transfer.findMany({ where: w.failedTransfers, orderBy: { updatedAt: 'desc' }, take }) : null,
+      commission ? this.prisma.transfer.findMany({ where: w.stuckTransfers, orderBy: { createdAt: 'asc' }, take }) : null,
       this.prisma.payout.findMany({ where: w.stuckPayouts, orderBy: { createdAt: 'asc' }, take }),
       this.prisma.payout.findMany({ where: w.failedPayouts, orderBy: { updatedAt: 'desc' }, take }),
       this.prisma.outboxMessage.findMany({ where: w.deadOutbox, orderBy: { createdAt: 'desc' }, take }),
@@ -249,8 +273,8 @@ export class AdminOpsService {
       Promise.all([
         this.prisma.reconciliationItem.count({ where: w.openItems }),
         this.prisma.webhookEvent.count({ where: w.webhookEvents }),
-        this.prisma.transfer.count({ where: w.failedTransfers }),
-        this.prisma.transfer.count({ where: w.stuckTransfers }),
+        commission ? this.prisma.transfer.count({ where: w.failedTransfers }) : null,
+        commission ? this.prisma.transfer.count({ where: w.stuckTransfers }) : null,
         this.prisma.payout.count({ where: w.stuckPayouts }),
         this.prisma.payout.count({ where: w.failedPayouts }),
         this.prisma.outboxMessage.count({ where: w.deadOutbox }),
@@ -368,7 +392,7 @@ export class AdminOpsService {
 
 export const SUMMARY_LIST_LIMIT = 100;
 
-export interface PaymentFilters { status?: string; channel?: string; feeType?: string; payerRef?: string; ref?: string; from?: string; to?: string }
+export interface PaymentFilters { status?: string; channel?: string; feeType?: string; payerRef?: string; ref?: string; from?: string; to?: string; department?: string; faculty?: string }
 
 type PaymentRow = Prisma.PaymentGetPayload<{ include: { obligation: { include: { payer: true; fee: { include: { feeType: true } } } }; receipt: true } }>;
 
@@ -379,13 +403,17 @@ function refFilter(raw: string): Prisma.PaymentWhereInput {
   return { OR: [{ monimePaymentId: v }, ...(ref ? [{ paymentRef: ref }, { monimeOrderNumber: ref }] : [])] };
 }
 
-function presentPayment(p: PaymentRow) {
+function presentPayment(p: PaymentRow, names: Map<string, DepartmentNames>) {
   const { obligation: o, receipt, ...rest } = p;
+  const n = (o.payer.department && names.get(o.payer.department)) || null;
   return {
     ...rest,
     feeTypeCode: o.fee.feeType.code,
     feeName: o.fee.name,
-    payer: { kind: o.payer.kind, ref: o.payer.ref, fullName: o.payer.fullName, programCode: o.payer.programCode, department: o.payer.department },
+    payer: {
+      kind: o.payer.kind, ref: o.payer.ref, fullName: o.payer.fullName, programCode: o.payer.programCode,
+      department: o.payer.department, departmentName: n?.departmentName ?? null, facultyCode: n?.facultyCode ?? null, facultyName: n?.facultyName ?? null,
+    },
     receiptNumber: receipt?.number ?? null,
   };
 }

@@ -51,7 +51,7 @@ against a non-local host unless `TEST_DATABASE_ADMIN_URL` is set explicitly.
 Mock portal:
 
 - `fixtures/portal/applicants.json` — 5 applicants (APPLIED / ADMITTED / REJECTED, one international)
-- `fixtures/portal/students.json` — 10 students, programs BSC-CS, BSC-IT (COMPUTING) and BSC-NUR (HEALTH), levels 1–4, two final-year
+- `fixtures/portal/students.json` — 10 students, programs BSC-CS, BSC-IT (COMPUTER-SCI) and BSC-NUR (NURSING), levels 1–4, two final-year
 - `fixtures/portal/notifications.log.json` — every `notifyPayment` is appended here (gitignored)
 - `PORTAL_MOCK_LATENCY_MS` adds artificial latency
 - unknown refs → `PortalError NOT_FOUND` (same shape as the HTTP client's 404); refs starting with `ERR-` → `UNAVAILABLE`
@@ -258,10 +258,17 @@ Supabase user id on first login).
 | Role | Can (permission bundle) | 2FA |
 |---|---|---|
 | `SUPER_ADMIN` | everything, incl. users, payouts, account provisioning | required |
-| `BURSAR` | fee setup, adjustments, refunds, reconciliation, transfer/outbox retries, reports | required |
+| `BURSAR` | fee setup, adjustments, refunds, reconciliation, outbox retries, reports | required |
 | `FINANCE_OFFICER` | read payers/payments/accounts/payouts, export | — |
 | `HEAD_OF_DEPARTMENT` | read-only, limited to their departments' payers and payments | — |
-| `AUDITOR` | read-only everywhere, incl. the audit log | — |
+| `DEAN` | read-only, limited to every department of their faculties (as they are now) | — |
+| `AUDITOR` | read-only everywhere (except commission transfers), incl. the audit log | — |
+
+**Commission transfers** (UNIMAK's share moving to the platform account) are super-admin only:
+grant `transfers.read` / `transfers.retry` on their own to anyone else. Without
+`transfers.read`, payment details show `commissionTransfer: null`, the reconciliation summary
+and reports show `null` for transfers/commission, and commission-transfer outbox messages are
+hidden.
 
 Single permissions can be granted on their own (`extraPermissions`, e.g.
 `instalments.manage`, or `payouts.manage` for a bursar). Nobody can grant permissions
@@ -278,9 +285,11 @@ they don't hold, and only super admins manage super admins. Every write is recor
 | POST/PATCH | `/fees` `{feeTypeId, name, period, allowInstalments, defaultMinInstalment?, dueDate?}` (DRAFT), `/fees/:id` (status DRAFT→ACTIVE→CLOSED; ACTIVE needs a rate rule and the account) | `fees.manage` |
 | POST/PUT/DELETE | `/fees/:id/rate-rules[/:ruleId]` `{programCode?, department?, level?, residency?, intake?, amount}` — ties rejected; deleting a tie-breaker refused | `fees.manage` |
 | POST/DELETE | `/fees/:id/eligibility-rules[/:ruleId]` (same matchers + `finalYear?`) | `fees.manage` |
-| PUT/DELETE | `/fees/:id/instalment-rules/:programCode` `{minInstalment}` | `instalments.manage` |
-| GET | `/reports/summary?from=&to=&feeType=&channel=` — collected by day / fee type / channel, payment funnel, commission, payouts | `reports.read` |
-| GET | `/payments`, `/payments/:id` (filters: status, channel, feeType, payerRef, `ref` = payment ref / Monime order no. / spm-… id, from, to) | `payments.read` |
+| PUT/DELETE | `/fees/:id/instalment-rules/:department` `{minInstalment}` — minimum instalment per department | `instalments.manage` |
+| GET | `/faculties` (with departments), `/departments?faculty=&needsReview=&active=`, `/departments/:code` | any admin |
+| POST/PATCH | `/faculties`, `/faculties/:code` `{name?, active?}`; `/departments`, `/departments/:code` `{name?, facultyCode?, active?}` | `academics.manage` |
+| GET | `/reports/summary?from=&to=&feeType=&channel=&department=&faculty=` — collected by day / fee type / channel / faculty / department, payment funnel, commission, payouts | `reports.read` |
+| GET | `/payments`, `/payments/:id`, `/payments/export.csv` (filters: status, channel, feeType, payerRef, `ref` = payment ref / Monime order no. / spm-… id, from, to, department, faculty) | `payments.read` / `payments.export` |
 | POST | `/payments/:id/reconcile` | `payments.reconcile` |
 | GET | `/financial-accounts`; POST `/financial-accounts/:id/refresh-balance` | `accounts.read` |
 | POST | `/financial-accounts/provision` | `accounts.manage` |
@@ -296,6 +305,16 @@ they don't hold, and only super admins manage super admins. Every write is recor
 
 Lists are cursor-paginated (`?limit=&cursor=` → `{ items, nextCursor }`); money is a
 string of minor units. Errors: 401 `UNAUTHENTICATED`, 403 `FORBIDDEN` / `MFA_REQUIRED`.
+
+**Faculties and departments.** Faculty → department, from unimak.edu.sl, with *temporary*
+codes (`COMPUTER-SCI`, `NURSING`, `FAC-NURSING-AHS`, …) plus Postgraduate Studies and
+Diploma & Certificate Studies groups. Department codes must match what the portal sends for
+a payer (students and applicants); when the real codes are known, a one-off migration renames
+them everywhere. Codes never change through the API and nothing is deleted (deactivate).
+Fee rules, minimum instalments and head-of-department access only take active, reviewed
+departments (400 otherwise); deans take active faculties. A department the portal sends that
+isn't listed is added with `needsReview: true` (no faculty) — payments never wait for it — for
+an admin to name and place (`PATCH /departments/:code {name, facultyCode}`).
 
 Bootstrap the first admin: `pnpm admin:create --email you@unimak.edu.sl --role SUPER_ADMIN`,
 then sign in to the portal with that email. In Supabase: disable public sign-ups (or rely
@@ -416,7 +435,7 @@ open items; admins resolve them with a note (audited).
 | Money = `bigint` minor units, half-up basis points | `src/shared/domain/money.ts` |
 | Most specific rate rule wins; ambiguous ties rejected on save | `catalog/domain/rate-rule.ts` |
 | Eligibility (incl. finalYear); no rules = everyone of the payer kind | `catalog/domain/eligibility.ts` |
-| Min instalment: program rule → fee default → full; capped at payable; `instalments.manage` | `catalog/domain/instalments.ts` |
+| Min instalment: department rule → fee default → full; capped at payable; `instalments.manage` | `catalog/domain/instalments.ts` |
 | Lazy obligations; ONCE fee types (APP…) once per payer | `payers/domain/obligation-planner.ts` |
 | balance = Σ ledger; holds = live INITIATED/PENDING; payable = balance − holds | `ledger/domain/position.ts` |
 | Fee split: 2.5 % total first, platform = total − Monime, ≥ 0 | `payments/domain/fee-split.ts` |
@@ -455,6 +474,7 @@ src/
     dev/             /dev/monime/simulate-webhook (non-production only)
     auth/            Supabase JWT verification, roles/permissions, admin guard
     audit/           append-only audit log
+    academics/       faculties → departments, checks, departments seen from the portal
     admin-api/       /v1/admin controllers (users, payments, accounts, payouts, reconciliation)
     ussd/            Monime USSD flow exchange (crypto, state machine)
     reconciliation/  nightly comparison with Monime

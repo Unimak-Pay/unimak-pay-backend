@@ -92,8 +92,8 @@ describe('permissions and department scope', () => {
   let nurPayment: string;
 
   beforeAll(async () => {
-    csPayment = await pay('student', 'UNI-2023-0004', '+23279200004', 'TUITION', '150000'); // COMPUTING
-    nurPayment = await pay('student', 'UNI-2024-0007', '+23234200007', 'TUITION', '200000'); // HEALTH
+    csPayment = await pay('student', 'UNI-2023-0004', '+23279200004', 'TUITION', '150000'); // COMPUTER-SCI
+    nurPayment = await pay('student', 'UNI-2024-0007', '+23234200007', 'TUITION', '200000'); // NURSING
   });
 
   it('finance officer can read payments but not move money or provision accounts', async () => {
@@ -107,12 +107,12 @@ describe('permissions and department scope', () => {
   });
 
   it('heads of department only see their department', async () => {
-    const h = await admin('HEAD_OF_DEPARTMENT', { departments: ['HEALTH'] });
+    const h = await admin('HEAD_OF_DEPARTMENT', { departments: ['NURSING'] });
     const list = await get('/v1/admin/payments', h.token).expect(200);
     const ids = list.body.items.map((p: { id: string }) => p.id);
     expect(ids).toContain(nurPayment);
     expect(ids).not.toContain(csPayment);
-    expect(list.body.items.every((p: { payer: { department: string } }) => p.payer.department === 'HEALTH')).toBe(true);
+    expect(list.body.items.every((p: { payer: { department: string } }) => p.payer.department === 'NURSING')).toBe(true);
     await get(`/v1/admin/payments/${csPayment}`, h.token).expect(404);
     await get(`/v1/admin/payments/${nurPayment}`, h.token).expect(200);
   });
@@ -211,7 +211,11 @@ describe('money operations behind admin auth', () => {
     const paymentId = await pay('student', 'UNI-2026-0008', '+23288200008', 'TUITION', '160000');
     const t = await prisma.transfer.findUniqueOrThrow({ where: { paymentId } });
     await http.post('/dev/monime/simulate-webhook').send({ transferId: t.id, outcome: 'failed' }).expect(200);
-    const b = await admin('BURSAR');
+    // commission transfers are super-admin only unless granted
+    const plain = await admin('BURSAR');
+    await post(`/v1/admin/transfers/${t.id}/retry`, plain.token).expect(403);
+    await get(`/v1/admin/transfers/${t.id}`, plain.token).expect(403);
+    const b = await admin('BURSAR', { extra: ['transfers.read', 'transfers.retry'] });
     const retried = await post(`/v1/admin/transfers/${t.id}/retry`, b.token).expect(200);
     expect(retried.body).toMatchObject({ status: 'SUBMITTED', attempt: 2, monimeTransferId: `trn-mock-commission-${paymentId}-2`.slice(0, 64) });
     await post(`/v1/admin/transfers/${t.id}/retry`, b.token).expect(409); // not FAILED any more
@@ -220,8 +224,18 @@ describe('money operations behind admin auth', () => {
   it('retries DEAD outbox messages', async () => {
     const msg = await prisma.outboxMessage.findFirstOrThrow({ where: { type: 'monime.commission_transfer', status: 'SENT' } }); // re-sending is idempotent on the payment
     await prisma.outboxMessage.update({ where: { id: msg.id }, data: { status: 'DEAD', attempts: 6 } });
+    // commission-transfer messages are hidden from admins who can't see commission transfers
     const b = await admin('BURSAR');
-    const res = await post(`/v1/admin/outbox/${msg.id}/retry`, b.token).expect(200);
+    await get(`/v1/admin/outbox/${msg.id}`, b.token).expect(404);
+    await post(`/v1/admin/outbox/${msg.id}/retry`, b.token).expect(404);
+    const listed = await get('/v1/admin/outbox?status=DEAD', b.token).expect(200);
+    expect(listed.body.items.some((m: { type: string }) => m.type === 'monime.commission_transfer')).toBe(false);
+    const summary = await get('/v1/admin/reconciliation', b.token).expect(200);
+    expect(summary.body).toMatchObject({ failedTransfers: null, stuckTransfers: null, counts: { failedTransfers: null, stuckTransfers: null } });
+    expect(summary.body.deadOutbox.some((m: { type: string }) => m.type === 'monime.commission_transfer')).toBe(false);
+
+    const s = await admin('SUPER_ADMIN');
+    const res = await post(`/v1/admin/outbox/${msg.id}/retry`, s.token).expect(200);
     expect(res.body.status).toBe('SENT');
   });
 

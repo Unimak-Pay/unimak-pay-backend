@@ -45,7 +45,7 @@ interface FeeSeed {
   dueDate: Date | null;
   rateRules: Rule[];
   eligibility: Omit<Prisma.EligibilityRuleCreateManyInput, 'feeId'>[];
-  instalmentRules: { programCode: string; minInstalment: bigint }[];
+  instalmentRules: { department: string; minInstalment: bigint }[];
 }
 
 const FEES: FeeSeed[] = [
@@ -62,8 +62,8 @@ const FEES: FeeSeed[] = [
     rateRules: tuitionRules,
     eligibility: [],
     instalmentRules: [
-      { programCode: 'BSC-NUR', minInstalment: SLE(2_000) },
-      { programCode: 'BSC-CS', minInstalment: SLE(1_500) },
+      { department: 'NURSING', minInstalment: SLE(2_000) },
+      { department: 'COMPUTER-SCI', minInstalment: SLE(1_500) },
     ],
   },
   {
@@ -76,8 +76,8 @@ const FEES: FeeSeed[] = [
   {
     typeCode: 'DEPT', name: 'Computing departmental fee 2026/27', period: '2026/27',
     allowInstalments: false, defaultMinInstalment: null, dueDate: new Date('2026-12-15'),
-    rateRules: [rule(SLE(300), { department: 'COMPUTING' })],
-    eligibility: [{ department: 'COMPUTING' }],
+    rateRules: [rule(SLE(300), { department: 'COMPUTER-SCI' })],
+    eligibility: [{ department: 'COMPUTER-SCI' }],
     instalmentRules: [],
   },
   {

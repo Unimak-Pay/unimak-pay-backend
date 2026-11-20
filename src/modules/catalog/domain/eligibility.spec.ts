@@ -14,7 +14,7 @@ describe('isEligible', () => {
     expect(isEligible([{ ...base, finalYear: true }], { ...p, finalYear: false })).toBe(false);
   });
   it('any matching rule suffices', () => {
-    expect(isEligible([{ ...base, department: 'COMPUTING' }, { ...base, level: 4 }], p)).toBe(true);
+    expect(isEligible([{ ...base, department: 'COMPUTER-SCI' }, { ...base, level: 4 }], p)).toBe(true);
   });
 });
 

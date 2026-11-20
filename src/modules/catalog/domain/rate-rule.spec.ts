@@ -17,7 +17,7 @@ const rule = (m: Partial<RateRule>, amount = 1000n): RateRule => ({
 const student: PayerProfile = {
   kind: 'STUDENT',
   programCode: 'BSC-CS',
-  department: 'COMPUTING',
+  department: 'COMPUTER-SCI',
   level: 2,
   residency: 'LOCAL',
   intake: '2025-SEP',
@@ -49,7 +49,7 @@ describe('resolveRate (specificity)', () => {
 
   it('a rule on a key the payer lacks (department=null) does not match', () => {
     const applicant = { ...student, kind: 'APPLICANT' as const, department: null, level: null };
-    expect(resolveRate([rule({ department: 'COMPUTING' })], applicant)).toBeNull();
+    expect(resolveRate([rule({ department: 'COMPUTER-SCI' })], applicant)).toBeNull();
   });
 
   it('throws on a runtime tie (defence in depth)', () => {

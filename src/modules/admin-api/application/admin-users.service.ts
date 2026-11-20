@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { AdminRole } from '@prisma/client';
 import { DomainError } from '../../../shared/domain/errors';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
+import { AcademicsService } from '../../academics/application/academics.service';
 import { AuditService } from '../../audit/audit.service';
 import type { AdminPrincipal } from '../../auth/application/admin-principal';
 import { AUTH_INVITER, type AuthInviter, type InviteOutcome } from '../../auth/application/auth-inviter.port';
@@ -26,6 +27,7 @@ export class AdminUsersService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     @Inject(AUTH_INVITER) private readonly inviter: AuthInviter,
+    private readonly academics: AcademicsService,
   ) {}
 
   list() {
@@ -38,16 +40,14 @@ export class AdminUsersService {
     return u;
   }
 
-  async create(actor: AdminPrincipal, input: { email: string; name?: string; role: AdminRole; extraPermissions?: string[]; departments?: string[] }) {
+  async create(actor: AdminPrincipal, input: { email: string; name?: string; role: AdminRole; extraPermissions?: string[]; departments?: string[]; faculties?: string[] }) {
     const email = input.email.trim().toLowerCase();
     assertCanGrant(actor, input.role, input.extraPermissions ?? []);
-    if (input.role === 'HEAD_OF_DEPARTMENT' && !input.departments?.length) {
-      throw new DomainError('VALIDATION', 'A head of department needs at least one department');
-    }
+    const scope = await this.scopeFor(input.role, input.departments ?? [], input.faculties ?? []);
     if (await this.prisma.adminUser.findUnique({ where: { email } })) throw new DomainError('INVALID_STATE', `${email} is already an admin`);
     const user = await this.prisma.$transaction(async (tx) => {
       const created = await tx.adminUser.create({
-        data: { email, name: input.name ?? null, role: input.role, extraPermissions: input.extraPermissions ?? [], departments: input.departments ?? [], createdBy: actor.id },
+        data: { email, name: input.name ?? null, role: input.role, extraPermissions: input.extraPermissions ?? [], ...scope, createdBy: actor.id },
       });
       await this.audit.record({ actorId: actor.id, action: 'admin_user.create', entity: 'AdminUser', entityId: created.id, after: created }, tx);
       return created;
@@ -71,7 +71,22 @@ export class AdminUsersService {
     return outcome;
   }
 
-  async update(actor: AdminPrincipal, id: string, patch: { name?: string; role?: AdminRole; extraPermissions?: string[]; departments?: string[]; active?: boolean }) {
+  /** Heads of department need departments, deans faculties; other roles keep neither. */
+  private async scopeFor(role: AdminRole, departments: string[], faculties: string[]) {
+    if (role === 'HEAD_OF_DEPARTMENT') {
+      if (!departments.length) throw new DomainError('VALIDATION', 'A head of department needs at least one department');
+      await this.academics.assertUsableDepartments(departments);
+      return { departments: [...new Set(departments)], faculties: [] };
+    }
+    if (role === 'DEAN') {
+      if (!faculties.length) throw new DomainError('VALIDATION', 'A dean needs at least one faculty');
+      await this.academics.assertUsableFaculties(faculties);
+      return { departments: [], faculties: [...new Set(faculties)] };
+    }
+    return { departments: [], faculties: [] };
+  }
+
+  async update(actor: AdminPrincipal, id: string, patch: { name?: string; role?: AdminRole; extraPermissions?: string[]; departments?: string[]; faculties?: string[]; active?: boolean }) {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "AdminUser" WHERE role = 'SUPER_ADMIN' FOR UPDATE`;
       const before = await tx.adminUser.findUnique({ where: { id } });
@@ -85,8 +100,13 @@ export class AdminUsersService {
       }
       const role = patch.role ?? before.role;
       assertCanGrant(actor, role, patch.extraPermissions ?? before.extraPermissions, before.role);
+      // only newly given codes are checked (a department deactivated since stays until changed)
       const departments = patch.departments ?? before.departments;
+      const faculties = patch.faculties ?? before.faculties;
       if (role === 'HEAD_OF_DEPARTMENT' && departments.length === 0) throw new DomainError('VALIDATION', 'A head of department needs at least one department');
+      if (role === 'DEAN' && faculties.length === 0) throw new DomainError('VALIDATION', 'A dean needs at least one faculty');
+      if (patch.departments) await this.academics.assertUsableDepartments(patch.departments, tx);
+      if (patch.faculties) await this.academics.assertUsableFaculties(patch.faculties, tx);
       const after = await tx.adminUser.update({ where: { id }, data: patch });
       await this.audit.record({ actorId: actor.id, action: 'admin_user.update', entity: 'AdminUser', entityId: id, before, after }, tx);
       return after;

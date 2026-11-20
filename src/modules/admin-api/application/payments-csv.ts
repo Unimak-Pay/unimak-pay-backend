@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import type { DepartmentNames } from '../../academics/application/academics.service';
 
 export const EXPORT_MAX_ROWS = 50_000;
 export const EXPORT_BATCH = 1_000;
@@ -25,16 +26,17 @@ export function cell(v: string | number | null | undefined): string {
 
 export const CSV_COLUMNS = [
   'created_at', 'completed_at', 'payment_ref', 'status', 'channel', 'collection_method',
-  'fee_type', 'fee_name', 'payer_kind', 'payer_ref', 'payer_name', 'program', 'department',
+  'fee_type', 'fee_name', 'payer_kind', 'payer_ref', 'payer_name', 'program', 'department', 'department_name', 'faculty', 'faculty_name',
   'amount_sle', 'monime_fee_sle', 'platform_fee_sle', 'net_sle',
   'payer_phone', 'monime_order_number', 'monime_payment_id', 'receipt_number', 'failure_reason', 'payment_id',
 ] as const;
 
-export function csvRow(p: Row): string {
+export function csvRow(p: Row, names: DepartmentNames): string {
   const o = p.obligation;
   return [
     p.createdAt.toISOString(), p.completedAt?.toISOString() ?? null, p.paymentRef, p.status, p.channel, p.collectionMethod,
     o.fee.feeType.code, o.fee.name, o.payer.kind, o.payer.ref, o.payer.fullName, o.payer.programCode, o.payer.department,
+    names.departmentName || null, names.facultyCode, names.facultyName,
     sle(p.amount), sle(p.monimeFee), sle(p.platformFee), sle(p.netAmount),
     p.payerPhone, p.monimeOrderNumber, p.monimePaymentId, p.receipt?.number ?? null, p.failureReason, p.id,
   ].map(cell).join(',');

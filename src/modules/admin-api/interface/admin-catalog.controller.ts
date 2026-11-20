@@ -133,18 +133,18 @@ export class AdminCatalogController {
     return this.catalog.deleteEligibilityRule(admin, id, ruleId);
   }
 
-  // ── Minimum instalment per program (instalments.manage) ────────────────────
+  // ── Minimum instalment per department (instalments.manage) ─────────────────
 
-  @Put('fees/:id/instalment-rules/:programCode')
+  @Put('fees/:id/instalment-rules/:department')
   @RequirePermissions('instalments.manage')
-  setInstalment(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Param('programCode') programCode: string, @Body() dto: InstalmentRuleDto) {
-    return this.catalog.setInstalmentRule(admin, id, programCode.toUpperCase().slice(0, 20), BigInt(dto.minInstalment));
+  setInstalment(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Param('department') department: string, @Body() dto: InstalmentRuleDto) {
+    return this.catalog.setInstalmentRule(admin, id, department, BigInt(dto.minInstalment));
   }
 
-  @Delete('fees/:id/instalment-rules/:programCode')
+  @Delete('fees/:id/instalment-rules/:department')
   @RequirePermissions('instalments.manage')
-  deleteInstalment(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Param('programCode') programCode: string) {
-    return this.catalog.deleteInstalmentRule(admin, id, programCode.toUpperCase());
+  deleteInstalment(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string, @Param('department') department: string) {
+    return this.catalog.deleteInstalmentRule(admin, id, department);
   }
 }
 

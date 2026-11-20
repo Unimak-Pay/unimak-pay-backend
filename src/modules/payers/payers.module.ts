@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AcademicsModule } from '../academics/academics.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { LedgerModule } from '../ledger/ledger.module';
 import { LookupPayerUseCase } from './application/lookup-payer.use-case';
@@ -8,7 +9,7 @@ import { PAYER_REPOSITORY } from './application/payer.repository';
 import { PrismaPayerRepository } from './infrastructure/prisma-payer.repository';
 
 @Module({
-  imports: [CatalogModule, LedgerModule],
+  imports: [AcademicsModule, CatalogModule, LedgerModule],
   providers: [
     { provide: PAYER_REPOSITORY, useClass: PrismaPayerRepository },
     PayerDirectory,

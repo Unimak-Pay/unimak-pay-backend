@@ -110,25 +110,26 @@ export class PrismaCatalogRepository implements CatalogRepository {
 
   async instalmentRuleMin(
     feeId: string,
-    programCode: string,
+    department: string | null,
     db: Db = this.prisma,
   ): Promise<Minor | null> {
+    if (!department) return null;
     const row = await db.instalmentRule.findUnique({
-      where: { feeId_programCode: { feeId, programCode } },
+      where: { feeId_department: { feeId, department } },
     });
     return row?.minInstalment ?? null;
   }
 
   async upsertInstalmentRule(
     feeId: string,
-    programCode: string,
+    department: string,
     minInstalment: Minor,
     updatedBy: string,
     db: Db = this.prisma,
   ): Promise<void> {
     await db.instalmentRule.upsert({
-      where: { feeId_programCode: { feeId, programCode } },
-      create: { feeId, programCode, minInstalment, updatedBy },
+      where: { feeId_department: { feeId, department } },
+      create: { feeId, department, minInstalment, updatedBy },
       update: { minInstalment, updatedBy },
     });
   }

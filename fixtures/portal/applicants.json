@@ -1,7 +1,7 @@
 [
-  { "applicationRef": "APP-2026-0001", "fullName": "Aminata Kamara", "phone": "+23276100001", "programCode": "BSC-CS", "intake": "2026-SEP", "residency": "LOCAL", "status": "APPLIED" },
-  { "applicationRef": "APP-2026-0002", "fullName": "Mohamed Bangura", "phone": "+23277100002", "programCode": "BSC-NUR", "intake": "2026-SEP", "residency": "LOCAL", "status": "ADMITTED" },
-  { "applicationRef": "APP-2026-0003", "fullName": "Fatmata Sesay", "phone": "+23278100003", "programCode": "BSC-IT", "intake": "2026-SEP", "residency": "LOCAL", "status": "REJECTED" },
-  { "applicationRef": "APP-2026-0004", "fullName": "Kwame Mensah", "phone": "+23299100004", "programCode": "BSC-CS", "intake": "2026-SEP", "residency": "INTERNATIONAL", "status": "APPLIED" },
-  { "applicationRef": "APP-2026-0005", "fullName": "Isatu Conteh", "phone": "+23230100005", "programCode": "BSC-IT", "intake": "2026-SEP", "residency": "LOCAL", "status": "ADMITTED" }
+  { "applicationRef": "APP-2026-0001", "fullName": "Aminata Kamara", "phone": "+23276100001", "programCode": "BSC-CS", "department": "COMPUTER-SCI", "intake": "2026-SEP", "residency": "LOCAL", "status": "APPLIED" },
+  { "applicationRef": "APP-2026-0002", "fullName": "Mohamed Bangura", "phone": "+23277100002", "programCode": "BSC-NUR", "department": "NURSING", "intake": "2026-SEP", "residency": "LOCAL", "status": "ADMITTED" },
+  { "applicationRef": "APP-2026-0003", "fullName": "Fatmata Sesay", "phone": "+23278100003", "programCode": "BSC-IT", "department": "COMPUTER-SCI", "intake": "2026-SEP", "residency": "LOCAL", "status": "REJECTED" },
+  { "applicationRef": "APP-2026-0004", "fullName": "Kwame Mensah", "phone": "+23299100004", "programCode": "BSC-CS", "department": "COMPUTER-SCI", "intake": "2026-SEP", "residency": "INTERNATIONAL", "status": "APPLIED" },
+  { "applicationRef": "APP-2026-0005", "fullName": "Isatu Conteh", "phone": "+23230100005", "programCode": "BSC-IT", "department": "COMPUTER-SCI", "intake": "2026-SEP", "residency": "LOCAL", "status": "ADMITTED" }
 ]

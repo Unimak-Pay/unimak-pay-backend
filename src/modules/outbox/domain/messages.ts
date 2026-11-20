@@ -23,6 +23,9 @@ export interface OutboxPayloads {
 
 export type OutboxType = keyof OutboxPayloads;
 
+/** Only admins who may see commission transfers see these messages. */
+export const COMMISSION_OUTBOX_TYPE = 'monime.commission_transfer' satisfies OutboxType;
+
 export type OutboxMessageInput = {
   [K in OutboxType]: { type: K; dedupeKey: string; payload: OutboxPayloads[K] };
 }[OutboxType];

@@ -66,6 +66,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
       payerRef: o.payer.ref,
       payerPortalPhone: o.payer.phone,
       programCode: o.payer.programCode,
+      department: o.payer.department,
     };
   }
 

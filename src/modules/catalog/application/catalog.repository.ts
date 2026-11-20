@@ -23,10 +23,11 @@ export interface CatalogRepository {
   /** Locks the fee row so concurrent rule edits on the same fee serialize. */
   lockFeeRateRules(feeId: string, db: Db): Promise<RateRule[]>;
   upsertRateRule(feeId: string, rule: RateRule, db: Db): Promise<void>;
-  instalmentRuleMin(feeId: string, programCode: string, db?: Db): Promise<Minor | null>;
+  /** Minimum instalment for the payer's department, if one is set. */
+  instalmentRuleMin(feeId: string, department: string | null, db?: Db): Promise<Minor | null>;
   upsertInstalmentRule(
     feeId: string,
-    programCode: string,
+    department: string,
     minInstalment: Minor,
     updatedBy: string,
     db?: Db,

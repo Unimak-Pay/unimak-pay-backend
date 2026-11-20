@@ -16,7 +16,7 @@ import { Document, isMap, isSeq, type YAMLMap } from 'yaml';
 
 /** Models the admin API returns as rows (alone or with extra fields). */
 export const MODELS = [
-  'AdminUser', 'AuditLog', 'EligibilityRule', 'Fee', 'FeeType', 'FinancialAccount', 'InstalmentRule', 'LedgerEntry',
+  'AdminUser', 'AuditLog', 'Department', 'EligibilityRule', 'Faculty', 'Fee', 'FeeType', 'FinancialAccount', 'InstalmentRule', 'LedgerEntry',
   'OutboxMessage', 'Payment', 'Payout', 'RateRule', 'ReconciliationItem', 'ReconciliationRun', 'Transfer', 'WebhookEvent',
 ] as const;
 

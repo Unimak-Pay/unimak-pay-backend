@@ -137,6 +137,20 @@ describe('admin API responses match openapi.yaml', () => {
     conforms('get', '/v1/admin/audit-log', await as('get', '/v1/admin/audit-log?limit=5').expect(200));
   });
 
+  it('faculties and departments', async () => {
+    conforms('get', '/v1/admin/faculties', await as('get', '/v1/admin/faculties').expect(200));
+    const code = `FAC-C${randomUUID().slice(0, 4)}`;
+    conforms('post', '/v1/admin/faculties', await as('post', '/v1/admin/faculties', { code, name: 'Contract faculty' }).expect(201));
+    const dept = `D-C${randomUUID().slice(0, 4)}`;
+    conforms('post', '/v1/admin/departments', await as('post', '/v1/admin/departments', { code: dept, name: 'Contract dept', facultyCode: code }).expect(201));
+    conforms('get', '/v1/admin/departments', await as('get', '/v1/admin/departments?active=true').expect(200));
+    conforms('get', '/v1/admin/departments/{code}', await as('get', `/v1/admin/departments/${dept}`).expect(200));
+    conforms('patch', '/v1/admin/departments/{code}', await as('patch', `/v1/admin/departments/${dept}`, { active: false }).expect(200));
+    conforms('patch', '/v1/admin/faculties/{code}', await as('patch', `/v1/admin/faculties/${code}`, { name: 'Renamed', active: false }).expect(200));
+    const dean = conforms('post', '/v1/admin/users', await as('post', '/v1/admin/users', { email: `dean-${randomUUID().slice(0, 6)}@unimak.test`, role: 'DEAN', faculties: ['FAC-NURSING-AHS'] }).expect(201));
+    expect(dean.faculties).toEqual(['FAC-NURSING-AHS']);
+  });
+
   it('payments, reports, export', async () => {
     paymentId = await payTuition('200000', 'contract-1');
     const list = conforms('get', '/v1/admin/payments', await as('get', '/v1/admin/payments?limit=3&sort=-amount').expect(200));
@@ -151,8 +165,8 @@ describe('admin API responses match openapi.yaml', () => {
     expect(csv.headers['content-type']).toBe('text/csv; charset=utf-8');
     expect(csv.headers['content-disposition']).toMatch(/^attachment; filename="unimak-payments-\d{4}-\d{2}-\d{2}\.csv"$/);
     const lines = csv.text.replace(/^﻿/, '').trimEnd().split('\r\n');
-    expect(lines[0]).toBe('created_at,completed_at,payment_ref,status,channel,collection_method,fee_type,fee_name,payer_kind,payer_ref,payer_name,program,department,amount_sle,monime_fee_sle,platform_fee_sle,net_sle,payer_phone,monime_order_number,monime_payment_id,receipt_number,failure_reason,payment_id');
-    expect(lines.find((l) => l.endsWith(paymentId))).toMatch(/,COMPLETED,DOTS,PAYMENT_CODE,TUITION,Tuition 2026\/27,STUDENT,UNI-2024-0007,Ama Owusu,BSC-NUR,HEALTH,2000\.00,/);
+    expect(lines[0]).toBe('created_at,completed_at,payment_ref,status,channel,collection_method,fee_type,fee_name,payer_kind,payer_ref,payer_name,program,department,department_name,faculty,faculty_name,amount_sle,monime_fee_sle,platform_fee_sle,net_sle,payer_phone,monime_order_number,monime_payment_id,receipt_number,failure_reason,payment_id');
+    expect(lines.find((l) => l.endsWith(paymentId))).toMatch(/,COMPLETED,DOTS,PAYMENT_CODE,TUITION,Tuition 2026\/27,STUDENT,UNI-2024-0007,Ama Owusu,BSC-NUR,NURSING,Nursing,FAC-NURSING-AHS,Faculty of Nursing and Allied Health Sciences,2000\.00,/);
     checked.add('GET /v1/admin/payments/export.csv');
   });
 
@@ -166,13 +180,13 @@ describe('admin API responses match openapi.yaml', () => {
     expect(fee.dueDate).toBe('2027-01-31');
     const rule = conforms('post', '/v1/admin/fees/{id}/rate-rules', await as('post', `/v1/admin/fees/${fee.id}/rate-rules`, { amount: '5000' }).expect(201));
     conforms('put', '/v1/admin/fees/{id}/rate-rules/{ruleId}', await as('put', `/v1/admin/fees/${fee.id}/rate-rules/${rule.id}`, { amount: '6000' }).expect(200));
-    const el = conforms('post', '/v1/admin/fees/{id}/eligibility-rules', await as('post', `/v1/admin/fees/${fee.id}/eligibility-rules`, { department: 'HEALTH' }).expect(201));
-    conforms('put', '/v1/admin/fees/{id}/instalment-rules/{programCode}', await as('put', `/v1/admin/fees/${fee.id}/instalment-rules/BSC-NUR`, { minInstalment: '2000' }).expect(200));
+    const el = conforms('post', '/v1/admin/fees/{id}/eligibility-rules', await as('post', `/v1/admin/fees/${fee.id}/eligibility-rules`, { department: 'NURSING' }).expect(201));
+    conforms('put', '/v1/admin/fees/{id}/instalment-rules/{department}', await as('put', `/v1/admin/fees/${fee.id}/instalment-rules/NURSING`, { minInstalment: '2000' }).expect(200));
     conforms('patch', '/v1/admin/fees/{id}', await as('patch', `/v1/admin/fees/${fee.id}`, { status: 'ACTIVE' }).expect(200));
     conforms('get', '/v1/admin/fees', await as('get', '/v1/admin/fees').expect(200));
     conforms('get', '/v1/admin/fees/{id}', await as('get', `/v1/admin/fees/${fee.id}`).expect(200));
     conforms('get', '/v1/admin/fees/{id}/preview', await as('get', `/v1/admin/fees/${fee.id}/preview?kind=student&ref=UNI-2024-0007`).expect(200));
-    conforms('delete', '/v1/admin/fees/{id}/instalment-rules/{programCode}', await as('delete', `/v1/admin/fees/${fee.id}/instalment-rules/BSC-NUR`).expect(200));
+    conforms('delete', '/v1/admin/fees/{id}/instalment-rules/{department}', await as('delete', `/v1/admin/fees/${fee.id}/instalment-rules/NURSING`).expect(200));
     conforms('delete', '/v1/admin/fees/{id}/eligibility-rules/{ruleId}', await as('delete', `/v1/admin/fees/${fee.id}/eligibility-rules/${el.id}`).expect(200));
     // the last rate rule can go once the fee is back to draft
     await as('patch', `/v1/admin/fees/${fee.id}`, { status: 'CLOSED' }).expect(200);
@@ -263,7 +277,7 @@ describe('admin API responses match openapi.yaml', () => {
     const foToken = adminToken({ sub: randomUUID(), email: fo, aal: 'aal1' });
     await http.get('/v1/admin/payments/export.csv').set('authorization', `Bearer ${foToken}`).expect(200); // payments.export
     const hod = `hod-${randomUUID().slice(0, 6)}@unimak.test`;
-    await prisma.adminUser.create({ data: { email: hod, role: 'HEAD_OF_DEPARTMENT', departments: ['HEALTH'] } });
+    await prisma.adminUser.create({ data: { email: hod, role: 'HEAD_OF_DEPARTMENT', departments: ['NURSING'] } });
     const hodToken = adminToken({ sub: randomUUID(), email: hod });
     await http.get('/v1/admin/payments/export.csv').set('authorization', `Bearer ${hodToken}`).expect(403); // no payments.export
     expect(await prisma.auditLog.count({ where: { action: 'payments.export' } })).toBeGreaterThan(0);

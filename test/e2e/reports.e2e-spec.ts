@@ -12,9 +12,9 @@ const prisma = new PrismaClient();
 const today = new Date().toISOString().slice(0, 10);
 const startOfToday = new Date(`${today}T00:00:00Z`);
 
-async function admin(role: 'SUPER_ADMIN' | 'FINANCE_OFFICER' | 'HEAD_OF_DEPARTMENT', departments: string[] = []) {
+async function admin(role: 'SUPER_ADMIN' | 'FINANCE_OFFICER' | 'HEAD_OF_DEPARTMENT', departments: string[] = [], extraPermissions: string[] = []) {
   const email = `${role.toLowerCase()}-${randomUUID().slice(0, 8)}@unimak.test`;
-  await prisma.adminUser.create({ data: { email, role, departments } });
+  await prisma.adminUser.create({ data: { email, role, departments, extraPermissions } });
   const token = adminToken({ sub: randomUUID(), email, aal: 'aal2' });
   return (query = '') => http.get(`/v1/admin/reports/summary${query}`).set('authorization', `Bearer ${token}`);
 }
@@ -100,15 +100,18 @@ describe('GET /v1/admin/reports/summary', () => {
   });
 
   it('heads of department only see their departments, without commission or payouts', async () => {
-    const health = await admin('HEAD_OF_DEPARTMENT', ['HEALTH']);
+    const health = await admin('HEAD_OF_DEPARTMENT', ['NURSING']);
     const body = (await health(`?from=${today}&to=${today}`).expect(200)).body;
-    expect(body.filters.departments).toEqual(['HEALTH']);
-    expect(body.collected).toMatchObject(await collectedToday({ obligation: { payer: { department: 'HEALTH' } } }));
-    expect(body.byFeeType.find((r: { feeTypeCode: string }) => r.feeTypeCode === 'GRAD')).toBeUndefined(); // UNI-2023-0010 is COMPUTING
+    expect(body.filters.departments).toEqual(['NURSING']);
+    expect(body.collected).toMatchObject(await collectedToday({ obligation: { payer: { department: 'NURSING' } } }));
+    expect(body.byFeeType.find((r: { feeTypeCode: string }) => r.feeTypeCode === 'GRAD')).toBeUndefined(); // UNI-2023-0010 is COMPUTER-SCI
     expect(body).toMatchObject({ commission: null, payouts: null });
 
+    // commission is super-admin only unless transfers.read is granted
     const fo = await admin('FINANCE_OFFICER');
-    expect((await fo(`?from=${today}&to=${today}`).expect(200)).body.commission).not.toBeNull();
+    expect((await fo(`?from=${today}&to=${today}`).expect(200)).body.commission).toBeNull();
+    const granted = await admin('FINANCE_OFFICER', [], ['transfers.read']);
+    expect((await granted(`?from=${today}&to=${today}`).expect(200)).body.commission).not.toBeNull();
   });
 
   it('validates the range', async () => {

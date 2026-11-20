@@ -84,7 +84,7 @@ describe('admin fee setup', () => {
   });
 
   it('limits the fee to computing students, activates it, and previews a payer', async () => {
-    await bursar.post(`/v1/admin/fees/${feeId}/eligibility-rules`, { department: 'COMPUTING' }).expect(201);
+    await bursar.post(`/v1/admin/fees/${feeId}/eligibility-rules`, { department: 'COMPUTER-SCI' }).expect(201);
     expect((await bursar.patch(`/v1/admin/fees/${feeId}`, { status: 'ACTIVE' }).expect(200)).body.status).toBe('ACTIVE');
 
     const cs = await bursar.get(`/v1/admin/fees/${feeId}/preview?kind=student&ref=UNI-2025-0003`).expect(200); // BSC-CS international
@@ -100,12 +100,15 @@ describe('admin fee setup', () => {
     expect(ob.body.obligations.find((o: { feeTypeCode: string }) => o.feeTypeCode === 'LIB')).toMatchObject({ amount: { value: '50000' }, minInstalment: { value: '5000' } });
   });
 
-  it('minimum instalment per program needs instalments.manage', async () => {
+  it('minimum instalment per department needs instalments.manage and a known department', async () => {
     const fo = await admin('FINANCE_OFFICER', ['fees.manage']);
-    await fo.put(`/v1/admin/fees/${feeId}/instalment-rules/bsc-cs`, { minInstalment: '10000' }).expect(403);
+    await fo.put(`/v1/admin/fees/${feeId}/instalment-rules/COMPUTER-SCI`, { minInstalment: '10000' }).expect(403);
     const contact = await admin('FINANCE_OFFICER', ['instalments.manage']);
-    const res = await contact.put(`/v1/admin/fees/${feeId}/instalment-rules/bsc-cs`, { minInstalment: '10000' }).expect(200);
-    expect(res.body).toMatchObject({ programCode: 'BSC-CS', minInstalment: '10000', updatedBy: contact.id });
+    const unknown = await contact.put(`/v1/admin/fees/${feeId}/instalment-rules/COMPUTING`, { minInstalment: '10000' }).expect(400);
+    expect(unknown.body.error.message).toBe('Unknown department COMPUTING');
+    await contact.put(`/v1/admin/fees/${feeId}/instalment-rules/computer-sci`, { minInstalment: '10000' }).expect(400); // codes are exact
+    const res = await contact.put(`/v1/admin/fees/${feeId}/instalment-rules/COMPUTER-SCI`, { minInstalment: '10000' }).expect(200);
+    expect(res.body).toMatchObject({ department: 'COMPUTER-SCI', minInstalment: '10000', updatedBy: contact.id });
     expect((await bursar.get(`/v1/admin/fees/${feeId}/preview?kind=student&ref=UNI-2025-0003`).expect(200)).body.minInstalment).toBe('10000');
   });
 

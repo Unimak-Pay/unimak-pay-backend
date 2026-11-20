@@ -17,7 +17,7 @@ export function fromApplicant(a: PortalApplicant): PayerSnapshot {
     fullName: a.fullName,
     phone: a.phone,
     programCode: a.programCode,
-    department: null,
+    department: a.department,
     level: null,
     finalYear: null,
     residency: a.residency,

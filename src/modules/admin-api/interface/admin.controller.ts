@@ -194,8 +194,8 @@ export class AdminController {
 
   @Get('reconciliation')
   @RequirePermissions('reconciliation.read')
-  reconciliation() {
-    return this.ops.reconciliationSummary();
+  reconciliation(@CurrentAdmin() admin: AdminPrincipal) {
+    return this.ops.reconciliationSummary(admin);
   }
 
   @Get('reconciliation/runs')
@@ -259,14 +259,14 @@ export class AdminController {
 
   @Get('outbox')
   @RequirePermissions('outbox.read')
-  outbox(@Query() q: OutboxQuery) {
-    return this.ops.listOutbox(q);
+  outbox(@CurrentAdmin() admin: AdminPrincipal, @Query() q: OutboxQuery) {
+    return this.ops.listOutbox(admin, q);
   }
 
   @Get('outbox/:id')
   @RequirePermissions('outbox.read')
-  getOutbox(@Param('id', ParseUUIDPipe) id: string) {
-    return this.ops.getOutbox(id);
+  getOutbox(@CurrentAdmin() admin: AdminPrincipal, @Param('id', ParseUUIDPipe) id: string) {
+    return this.ops.getOutbox(admin, id);
   }
 
   @Post('outbox/:id/retry')

@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { DomainError } from '../../../shared/domain/errors';
 import type { Minor } from '../../../shared/domain/money';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
+import { AcademicsService } from '../../academics/application/academics.service';
 import { AuditService } from '../../audit/audit.service';
 import type { AdminPrincipal } from '../../auth/application/admin-principal';
 import { SaveRateRuleUseCase } from '../../catalog/application/save-rate-rule.use-case';
@@ -19,7 +20,7 @@ const feeInclude = {
   feeType: { include: { account: true } },
   rateRules: { orderBy: [{ programCode: 'asc' }, { level: 'asc' }, { residency: 'asc' }] },
   eligibilityRules: true,
-  instalmentRules: { orderBy: { programCode: 'asc' } },
+  instalmentRules: { orderBy: { department: 'asc' } },
   _count: { select: { obligations: true } },
 } satisfies Prisma.FeeInclude;
 
@@ -43,6 +44,7 @@ export class AdminCatalogService {
     private readonly rateRules: SaveRateRuleUseCase,
     private readonly setInstalment: SetInstalmentRuleUseCase,
     private readonly directory: PayerDirectory,
+    private readonly academics: AcademicsService,
   ) {}
 
   // ── Fee types (+ their Monime account) ─────────────────────────────────────
@@ -145,6 +147,7 @@ export class AdminCatalogService {
   /** Tie rejection on save (domain rule): equal-specificity overlapping rules need a tie-breaker first. */
   async saveRateRule(admin: AdminPrincipal, feeId: string, rule: Matchers & { amount: Minor }, ruleId?: string) {
     await this.getFee(feeId);
+    await this.academics.assertUsableDepartments([rule.department]);
     const before = ruleId ? await this.prisma.rateRule.findUnique({ where: { id: ruleId } }) : null;
     if (ruleId && (!before || before.feeId !== feeId)) throw new DomainError('NOT_FOUND', 'Rate rule not found');
     const { id } = await this.rateRules.execute({ feeId, ...rule, ...(ruleId ? { id: ruleId } : {}) });
@@ -175,6 +178,7 @@ export class AdminCatalogService {
 
   async addEligibilityRule(admin: AdminPrincipal, feeId: string, rule: Matchers & { finalYear: boolean | null }) {
     await this.getFee(feeId);
+    await this.academics.assertUsableDepartments([rule.department]);
     return this.prisma.$transaction(async (tx) => {
       const row = await tx.eligibilityRule.create({ data: { feeId, ...rule } });
       await this.audit.record({ actorId: admin.id, action: 'eligibility_rule.create', entity: 'EligibilityRule', entityId: row.id, after: row }, tx);
@@ -194,16 +198,17 @@ export class AdminCatalogService {
 
   // ── Minimum instalments (instalments.manage) ───────────────────────────────
 
-  async setInstalmentRule(admin: AdminPrincipal, feeId: string, programCode: string, minInstalment: Minor) {
-    const before = await this.prisma.instalmentRule.findUnique({ where: { feeId_programCode: { feeId, programCode } } });
-    await this.setInstalment.execute({ id: admin.id, permissions: [...admin.permissions] }, { feeId, programCode, minInstalment });
-    const after = await this.prisma.instalmentRule.findUniqueOrThrow({ where: { feeId_programCode: { feeId, programCode } } });
+  async setInstalmentRule(admin: AdminPrincipal, feeId: string, department: string, minInstalment: Minor) {
+    await this.academics.assertUsableDepartments([department]);
+    const before = await this.prisma.instalmentRule.findUnique({ where: { feeId_department: { feeId, department } } });
+    await this.setInstalment.execute({ id: admin.id, permissions: [...admin.permissions] }, { feeId, department, minInstalment });
+    const after = await this.prisma.instalmentRule.findUniqueOrThrow({ where: { feeId_department: { feeId, department } } });
     await this.audit.record({ actorId: admin.id, action: 'instalment_rule.set', entity: 'InstalmentRule', entityId: after.id, before, after });
     return after;
   }
 
-  async deleteInstalmentRule(admin: AdminPrincipal, feeId: string, programCode: string) {
-    const before = await this.prisma.instalmentRule.findUnique({ where: { feeId_programCode: { feeId, programCode } } });
+  async deleteInstalmentRule(admin: AdminPrincipal, feeId: string, department: string) {
+    const before = await this.prisma.instalmentRule.findUnique({ where: { feeId_department: { feeId, department } } });
     if (!before) throw new DomainError('NOT_FOUND', 'Instalment rule not found');
     await this.prisma.$transaction(async (tx) => {
       await tx.instalmentRule.delete({ where: { id: before.id } });
@@ -228,7 +233,7 @@ export class AdminCatalogService {
     } catch {
       ambiguous = true;
     }
-    const instalment = fee.allowInstalments ? fee.instalmentRules.find((r) => r.programCode === payer.programCode) : undefined;
+    const instalment = fee.allowInstalments ? fee.instalmentRules.find((r) => r.department === payer.department) : undefined;
     return {
       payer: { kind, ref, programCode: payer.programCode, department: payer.department, level: payer.level, residency: payer.residency, intake: payer.intake, finalYear: payer.finalYear },
       fee: { id: fee.id, name: fee.name, status: fee.status, feeType: fee.feeType.code },
