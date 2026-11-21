@@ -145,6 +145,18 @@ describe('admin API responses match openapi.yaml', () => {
     expect((events.items as Json[]).length).toBeGreaterThanOrEqual(3);
     const review = conforms('get', '/v1/admin/payers/needs-review', await as('get', '/v1/admin/payers/needs-review').expect(200));
     expect((review.items as Json[]).some((i) => i.ref === 'UNI-2026-0301')).toBe(true);
+
+    // analytics
+    const report = conforms('get', '/v1/admin/reports/outstanding', await as('get', '/v1/admin/reports/outstanding?includeInactive=true').expect(200));
+    expect((report.grid as Json[]).length).toBeGreaterThan(0);
+    const payers = conforms('get', '/v1/admin/payers', await as('get', '/v1/admin/payers?q=UNI-2026-0301&includeInactive=true').expect(200));
+    expect(payers.items).toHaveLength(1);
+    const detail = conforms('get', '/v1/admin/payers/{id}', await as('get', `/v1/admin/payers/${payers.items[0].id}`).expect(200));
+    expect((detail.obligations as Json[]).length).toBeGreaterThan(0);
+    const csv = await as('get', '/v1/admin/payers/export.csv?q=UNI-2026-0301&includeInactive=true').expect(200);
+    expect(csv.headers['content-disposition']).toMatch(/^attachment; filename="unimak-payers-\d{4}-\d{2}-\d{2}\.csv"$/);
+    expect(csv.text.trimEnd().split('\r\n')).toHaveLength(2);
+    checked.add('GET /v1/admin/payers/export.csv');
   });
 
   it('faculties and departments', async () => {
