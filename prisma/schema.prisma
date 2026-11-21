@@ -212,6 +212,8 @@ model Payer {
   receipts    Receipt[]
 
   @@unique([kind, ref])
+  /// analytics grid and payer list filters
+  @@index([department, level])
 }
 
 model Obligation {

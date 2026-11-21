@@ -1,6 +1,8 @@
 import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
 import { PERMISSIONS } from '../../auth/domain/permissions';
+import { STANDING_FILTERS, type StandingFilter } from '../../payers/domain/standing';
+import { PAYER_SORTS, type PayerSort } from '../application/admin-analytics.service';
 
 const ROLES = ['SUPER_ADMIN', 'BURSAR', 'FINANCE_OFFICER', 'HEAD_OF_DEPARTMENT', 'DEAN', 'AUDITOR'] as const;
 const toDigits = ({ value }: { value: unknown }): unknown => (typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : value);
@@ -330,4 +332,62 @@ export class NeedsReviewQuery extends PageQuery {
 
   @IsOptional() @IsIn(['SUSPENDED', 'WITHDRAWN', 'GRADUATED'])
   status?: 'SUSPENDED' | 'WITHDRAWN' | 'GRADUATED';
+}
+
+// ── Analytics (docs/analytics.md) ─────────────────────────────────────────────
+
+
+export class FeeSelectionQuery {
+  @IsOptional() @IsUUID()
+  feeId?: string;
+
+  @IsOptional() @Matches(CODE)
+  feeType?: string;
+
+  /** "2026/27" or "2026-SEP" */
+  @IsOptional() @IsString() @Length(1, 20)
+  period?: string;
+
+  @IsOptional() @Matches(CODE)
+  department?: string;
+
+  /** Faculty.code: its departments as they are now */
+  @IsOptional() @Matches(CODE)
+  faculty?: string;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10)
+  level?: number;
+
+  /** count suspended, withdrawn and graduated students too */
+  @IsOptional() @Transform(optionalBool) @IsBoolean()
+  includeInactive?: boolean;
+}
+
+export class OutstandingQuery extends FeeSelectionQuery {}
+
+export class PayersExportQuery extends FeeSelectionQuery {
+  @IsOptional() @IsIn(['STUDENT', 'APPLICANT'])
+  kind?: 'STUDENT' | 'APPLICANT';
+
+  @IsOptional() @IsIn(['ACTIVE', 'SUSPENDED', 'WITHDRAWN', 'GRADUATED'])
+  enrolmentStatus?: 'ACTIVE' | 'SUSPENDED' | 'WITHDRAWN' | 'GRADUATED';
+
+  @IsOptional() @IsIn(STANDING_FILTERS)
+  standing?: StandingFilter;
+
+  /** ref or name contains */
+  @IsOptional() @IsString() @Length(1, 64)
+  q?: string;
+
+  @IsOptional() @IsIn(PAYER_SORTS)
+  sort?: PayerSort;
+}
+
+export class PayersQuery extends PayersExportQuery {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200)
+  limit = 50;
+
+  /** nextCursor from the previous page (same sort) */
+  @IsOptional() @IsString() @Length(1, 400)
+  cursor?: string;
 }
