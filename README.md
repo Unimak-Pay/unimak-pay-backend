@@ -306,6 +306,9 @@ they don't hold, and only super admins manage super admins. Every write is recor
 | GET | `/outbox`; POST `/outbox/:id/retry` | `outbox.read` / `outbox.retry` |
 | GET | `/portal-events?type=&result=&ref=` — what the portal sent (90 days) and `lastAppliedAt` | `portal.read` |
 | GET | `/payers/needs-review?department=&status=` — suspended / withdrawn / graduated students who still owe (scoped for heads of department and deans) | `payers.read` |
+| GET | `/reports/outstanding?feeId=&feeType=&period=&faculty=&department=&level=&includeInactive=` — billed / collected / outstanding by department × level, per fee, applicants by status, active students with no obligation | `reports.read` |
+| GET | `/payers?…same filters…&kind=&standing=PAID\|PART_PAID\|UNPAID\|NOT_BILLED\|OVERDUE&enrolmentStatus=&q=&sort=-balance\|balance\|name\|ref` — who owes what (phones masked); `/payers/export.csv` the same as CSV, audited | `payers.read` / + `payments.export` |
+| GET | `/payers/:id` — one payer: record (full phone), linked applicant/student, obligations with ledger and payments, receipts, portal events | `payers.read` |
 | GET | `/audit-log` | `audit.read` |
 
 Lists are cursor-paginated (`?limit=&cursor=` → `{ items, nextCursor }`); money is a

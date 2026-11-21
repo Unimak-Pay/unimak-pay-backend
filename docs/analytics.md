@@ -1,6 +1,6 @@
 # Fee analytics: plan
 
-Status: **proposed** (2026-11-21), waiting for the owner's OK. Follows `docs/portal-events.md`: once the portal backfill
+Status: **built** (2026-11-21). The owner accepted all four recommendations below. Follows `docs/portal-events.md`: once the portal backfill
 has filled the roster, every student has their obligations, so "who owes what" can be answered from our own data.
 
 ## Goal
@@ -71,7 +71,7 @@ The record (with `applicationRef` linking to the applicant), each obligation wit
 instalment, balance and ledger entries, payments (status, channel, amount, dates), receipts, and the last 20 portal
 events for that ref. A department-scoped admin gets 404 for a payer outside their departments.
 
-## Decisions needed
+## Decisions (owner, 2026-11-21: all as recommended)
 
 1. **Phone numbers in admin views.** Recommend: full phone in the detail view only (bursary needs to call), masked in
    lists and the CSV. Alternative: masked everywhere for heads of department and deans.
@@ -91,3 +91,12 @@ events for that ref. A department-scoped admin gets 404 for a payer outside thei
 
 No schema change and no new dependency. One index is worth adding: `Payer(department, level)` for the grid and list
 filters.
+
+## Where it lives
+
+| Piece | Where |
+|---|---|
+| Standing, totals, collection rate | `src/modules/payers/domain/standing.ts` |
+| Report, list, CSV, detail | `src/modules/admin-api/application/admin-analytics.service.ts` |
+| Routes (with needs-review, before `payers/:id`) | `src/modules/admin-api/interface/admin-payers.controller.ts` |
+| Tests | `test/e2e/analytics.e2e-spec.ts`, contract test |

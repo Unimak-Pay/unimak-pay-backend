@@ -407,6 +407,8 @@ The admin portal is a Vite + React app on Vercel, signed in through Supabase Aut
 | Head of department | Read-only, limited to their department's fees and students |
 | Auditor | Read-only everywhere, including the audit log |
 
+**Payer analytics** (owner decisions, 2026-11-21; `docs/analytics.md`). Billed, collected and outstanding are computed live from obligations and the ledger, by department × level, down to the student list and one student's detail. Overdue = outstanding on a fee past its due date. Inactive students are left out of totals unless asked for (they're in Needs review). Lists and the CSV mask phones; only the detail page shows the full number. The CSV needs `payments.export` and is audited. Heads of department and deans only ever see their departments.
+
 Roles are bundles of permissions, and a single permission can be granted on its own. For example, `instalments.manage` (set the minimum instalment per program) can go to a program's finance contact without giving them full fee setup.
 
 ## Running on Vercel
