@@ -13,3 +13,5 @@ export function testDatabaseUrl(name: string): string {
 export const TEST_WEBHOOK_SECRET = 'e2e-webhook-secret-0123456789abcdef0123';
 export const TEST_CLIENT = { id: 'ussd', apiKey: 'e2e-ussd-key', secret: 'e2e-ussd-secret-0123456789' };
 export const TEST_CRON_SECRET = 'e2e-cron-secret-0123456789';
+export const TEST_PORTAL_SECRET = 'e2e-portal-secret-0123456789abcdef0123';
+export const TEST_PORTAL_SECRET_OLD = 'e2e-portal-secret-old-0123456789abcdef0';

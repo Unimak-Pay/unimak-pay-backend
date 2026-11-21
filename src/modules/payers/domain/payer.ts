@@ -13,11 +13,29 @@ export interface PayerSnapshot {
   residency: Residency;
   intake: string;
   applicantStatus: string | null;
+  /** students, when the portal says (events); null = not known, treated as active */
+  enrolmentStatus: EnrolmentStatus | null;
+  /** students: the application they came from */
+  applicationRef: string | null;
 }
+
+export type EnrolmentStatus = 'ACTIVE' | 'SUSPENDED' | 'WITHDRAWN' | 'GRADUATED';
+export const ENROLMENT_STATUSES: readonly EnrolmentStatus[] = ['ACTIVE', 'SUSPENDED', 'WITHDRAWN', 'GRADUATED'];
 
 export interface Payer extends PayerSnapshot {
   id: string;
+  /** when we last got this record from the portal (event or lookup) */
   snapshotAt: Date;
+  /** the portal's updatedAt of the last event applied */
+  portalUpdatedAt: Date | null;
+}
+
+/**
+ * Only students the portal says aren't active get no new charges. What they already
+ * owe stays payable (owner decision, 2026-11-21).
+ */
+export function canBeCharged(p: Pick<PayerSnapshot, 'kind' | 'enrolmentStatus'>): boolean {
+  return p.kind !== 'STUDENT' || p.enrolmentStatus === null || p.enrolmentStatus === 'ACTIVE';
 }
 
 export function toProfile(p: PayerSnapshot): PayerProfile {

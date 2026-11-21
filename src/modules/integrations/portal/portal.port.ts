@@ -12,7 +12,7 @@ export interface PortalApplicant {
   department: string;
   intake: string;
   residency: Residency;
-  status: 'APPLIED' | 'ADMITTED' | 'REJECTED';
+  status: 'APPLIED' | 'ADMITTED' | 'REJECTED' | 'WITHDRAWN';
 }
 
 export interface PortalStudent {
@@ -25,6 +25,9 @@ export interface PortalStudent {
   finalYear: boolean;
   residency: Residency;
   intake: string;
+  /** when the portal's GET returns it */
+  enrolmentStatus?: 'ACTIVE' | 'SUSPENDED' | 'WITHDRAWN' | 'GRADUATED';
+  applicationRef?: string | null;
 }
 
 export interface CohortQuery {

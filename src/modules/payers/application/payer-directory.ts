@@ -23,6 +23,8 @@ export function fromApplicant(a: PortalApplicant): PayerSnapshot {
     residency: a.residency,
     intake: a.intake,
     applicantStatus: a.status,
+    enrolmentStatus: null,
+    applicationRef: null,
   };
 }
 
@@ -39,6 +41,8 @@ export function fromStudent(s: PortalStudent): PayerSnapshot {
     residency: s.residency,
     intake: s.intake,
     applicantStatus: null,
+    enrolmentStatus: s.enrolmentStatus ?? null,
+    applicationRef: s.applicationRef ?? null,
   };
 }
 

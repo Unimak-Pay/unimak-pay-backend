@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import type request from 'supertest';
 import { signMonimePayload } from '../../src/modules/webhooks/domain/monime-signature';
-import { TEST_CLIENT, TEST_WEBHOOK_SECRET } from './test-env';
+import { TEST_CLIENT, TEST_PORTAL_SECRET, TEST_WEBHOOK_SECRET } from './test-env';
 
 type Http = ReturnType<typeof request>;
 
@@ -35,4 +35,14 @@ export function adminToken(c: { sub: string; email?: string; aal?: 'aal1' | 'aal
   });
   const key = createPrivateKey(process.env.E2E_JWT_PRIVATE_KEY!);
   return `${head}.${body}.${sign('sha256', Buffer.from(`${head}.${body}`), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
+}
+
+/** Portal-signed request (docs/portal-events.md A2). */
+export function portal(http: Http, method: 'get' | 'post', url: string, body?: object, opts: { secret?: string; ts?: number } = {}) {
+  const raw = body ? JSON.stringify(body) : '';
+  const ts = String(opts.ts ?? Math.floor(Date.now() / 1000));
+  const sig = `v1=${createHmac('sha256', opts.secret ?? TEST_PORTAL_SECRET).update(`${ts}.${raw}`).digest('hex')}`;
+  let req = http[method](url).set('x-portal-timestamp', ts).set('x-portal-signature', sig);
+  if (body) req = req.set('content-type', 'application/json').send(raw);
+  return req;
 }

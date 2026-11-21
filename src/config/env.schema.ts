@@ -183,6 +183,21 @@ export class EnvSchema {
   @Max(120)
   PAYMENT_EXPIRY_MINUTES = 15;
 
+  /**
+   * Shared with the university portal: it signs POST /v1/portal/events with this
+   * (docs/portal-events.md). Unset = the endpoint answers 503.
+   */
+  @IsString()
+  @MinLength(32)
+  @IsOptional()
+  PORTAL_EVENTS_SECRET?: string;
+
+  /** The previous portal secret, still accepted while either side rotates. */
+  @IsString()
+  @MinLength(32)
+  @IsOptional()
+  PORTAL_EVENTS_SECRET_PREVIOUS?: string;
+
   /** Requests per minute per client IP on the public dot API (/v1/dot). */
   @Type(() => Number)
   @IsInt()

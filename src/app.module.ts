@@ -5,6 +5,7 @@ import { HealthController } from './health.controller';
 import { AdminApiModule } from './modules/admin-api/admin-api.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
+import { PortalApiModule } from './modules/portal-api/portal-api.module';
 import { ChannelApiModule } from './modules/channel-api/channel-api.module';
 import { CronModule } from './modules/cron/cron.module';
 import { DevModule } from './modules/dev/dev.module';
@@ -27,6 +28,7 @@ function devModules(): (Type | DynamicModule)[] {
     IntegrationsModule,
     CatalogModule,
     ChannelApiModule,
+    PortalApiModule,
     WebhooksModule,
     UssdModule,
     CronModule,

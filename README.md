@@ -167,6 +167,7 @@ There are four API surfaces, each with its own protection:
 | `POST /v1/ussd/exchange/<token>` | Monime USSD flow (HTTPS domain) | RSA-OAEP + AES-128-GCM (our key pair), secret path token |
 | `/v1/channel/*` | Server-to-server clients | API key + HMAC over timestamp + body |
 | `/v1/dot/*` | The UNIMAK dot in Monime Dash (its code is public) | None: per-IP limit, masked phone, server-decided amounts |
+| `/v1/portal/*` | The university portal (student and applicant changes) | HMAC over timestamp + body (`PORTAL_EVENTS_SECRET`, previous one accepted while rotating) |
 | `/v1/admin/*` | Admin portal | Supabase Auth access token + role/permission guard, 2FA for bursar & super admin |
 | `/webhooks/monime`, `/r/:code` | Monime / anyone | Monime HMAC signature / public read-only |
 
@@ -303,6 +304,8 @@ they don't hold, and only super admins manage super admins. Every write is recor
 | POST | `/reconciliation/runs` `{date?}`, `/reconciliation/items/:id/resolve` `{resolution}` | `reconciliation.manage` |
 | POST | `/reconciliation/webhook-events/:id/resolve` `{resolution}`, `/…/replay` | `reconciliation.manage` |
 | GET | `/outbox`; POST `/outbox/:id/retry` | `outbox.read` / `outbox.retry` |
+| GET | `/portal-events?type=&result=&ref=` — what the portal sent (90 days) and `lastAppliedAt` | `portal.read` |
+| GET | `/payers/needs-review?department=&status=` — suspended / withdrawn / graduated students who still owe (scoped for heads of department and deans) | `payers.read` |
 | GET | `/audit-log` | `audit.read` |
 
 Lists are cursor-paginated (`?limit=&cursor=` → `{ items, nextCursor }`); money is a
@@ -366,6 +369,22 @@ method `DASH_SHEET`; it makes no Monime call. The dot passes `order` and
 payment id, so Monime's `payment.processing_completed` settles it like any other payment
 (the webhook carries the reference, metadata and financial account). The dot must belong
 to the same Space as `MONIME_API_KEY`.
+
+### Portal events — `/v1/portal` (from the university portal)
+
+The portal pushes every student and applicant change as signed batches of 1-500 events; the contract is
+[docs/portal-events.md](docs/portal-events.md). Each event carries the full record. We store it, create the
+payer's missing obligations straight away (students who aren't ACTIVE get no new charges), and answer per event
+`APPLIED` / `DUPLICATE` / `STALE` / `REJECTED`. `GET /v1/portal/summary` returns our counts for the portal to
+compare. Events are kept 90 days.
+
+Lookups (USSD, dot, channel API) read our store first. The portal is only asked about someone we've never seen,
+or a record not refreshed for 30 days; if it's down, the stored record is served.
+
+```bash
+pnpm portal:event POST /v1/portal/events @batch.json   # signs with PORTAL_EVENTS_SECRET
+pnpm portal:event GET  /v1/portal/summary
+```
 
 ### Channel API — `/v1/channel` (server-to-server)
 
@@ -533,7 +552,8 @@ Set on Vercel: `DATABASE_URL` (Supabase transaction pooler,
 `NODE_ENV=production`, `PUBLIC_BASE_URL`, the Monime and portal settings,
 `MONIME_WEBHOOK_SECRET` (32–256 chars), `CHANNEL_CLIENTS`, `CRON_SECRET`,
 `SUPABASE_URL` (admin auth), `USSD_RSA_PRIVATE_KEY` and `USSD_EXCHANGE_PATH_TOKEN`.
-Optional: `DOT_RATE_LIMIT_PER_MINUTE` (default 60).
+Optional: `DOT_RATE_LIMIT_PER_MINUTE` (default 60); `PORTAL_EVENTS_SECRET` (32+ chars, shared with the portal;
+unset = `/v1/portal/*` answers 503) and `PORTAL_EVENTS_SECRET_PREVIOUS` while rotating.
 Run `pnpm db:deploy` with `DIRECT_URL` before deploying a new migration, then
 `pnpm monime:provision` and `pnpm monime:register-webhook https://<domain>/webhooks/monime`
 once per environment.

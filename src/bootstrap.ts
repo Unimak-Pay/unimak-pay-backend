@@ -16,6 +16,8 @@ export async function createApp(): Promise<INestApplication> {
 }
 
 export function configureApp(app: INestApplication): void {
+  // 1 MB: room for a 500-event portal batch (docs/portal-events.md); Express's default is 100 KB.
+  (app as NestExpressApplication).useBodyParser('json', { limit: '1mb' });
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );

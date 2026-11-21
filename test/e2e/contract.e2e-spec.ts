@@ -10,7 +10,7 @@ import { parse } from 'yaml';
 import { createApp } from '../../src/bootstrap';
 import { EXPORT_MAX_ROWS } from '../../src/modules/admin-api/application/payments-csv';
 import { ProvisionAccountsUseCase } from '../../src/modules/treasury/application/provision-accounts.use-case';
-import { adminToken, channel, monimeEvent } from './helpers';
+import { adminToken, channel, monimeEvent, portal } from './helpers';
 
 /**
  * Contract test: every admin operation in openapi.yaml is called, and each
@@ -135,6 +135,16 @@ describe('admin API responses match openapi.yaml', () => {
     conforms('post', '/v1/admin/users/{id}/invite', await as('post', `/v1/admin/users/${created.id}/invite`).expect(200));
     conforms('patch', '/v1/admin/users/{id}', await as('patch', `/v1/admin/users/${created.id}`, { active: false }).expect(200));
     conforms('get', '/v1/admin/audit-log', await as('get', '/v1/admin/audit-log?limit=5').expect(200));
+    // portal sync: one applied and one rejected event, and a suspended student who still owes
+    await portal(http, 'post', '/v1/portal/events', { events: [
+      { id: 'contract-evt-1', type: 'student.upserted', occurredAt: '2026-11-21T09:00:00Z', data: { studentId: 'UNI-2026-0301', applicationRef: null, fullName: 'Contract Student', phone: '+23276203010', programCode: 'BSC-CS', department: 'COMPUTER-SCI', level: 1, finalYear: false, residency: 'LOCAL', intake: '2026-SEP', enrolmentStatus: 'ACTIVE', updatedAt: '2026-11-21T09:00:00Z' } },
+      { id: 'contract-evt-2', type: 'student.upserted', occurredAt: '2026-11-21T09:00:00Z', data: { studentId: 'UNI-2026-0301' } },
+      { id: 'contract-evt-3', type: 'student.upserted', occurredAt: '2026-11-21T09:05:00Z', data: { studentId: 'UNI-2026-0301', applicationRef: null, fullName: 'Contract Student', phone: '+23276203010', programCode: 'BSC-CS', department: 'COMPUTER-SCI', level: 1, finalYear: false, residency: 'LOCAL', intake: '2026-SEP', enrolmentStatus: 'SUSPENDED', updatedAt: '2026-11-21T09:05:00Z' } },
+    ] }).expect(200);
+    const events = conforms('get', '/v1/admin/portal-events', await as('get', '/v1/admin/portal-events?limit=5').expect(200));
+    expect((events.items as Json[]).length).toBeGreaterThanOrEqual(3);
+    const review = conforms('get', '/v1/admin/payers/needs-review', await as('get', '/v1/admin/payers/needs-review').expect(200));
+    expect((review.items as Json[]).some((i) => i.ref === 'UNI-2026-0301')).toBe(true);
   });
 
   it('faculties and departments', async () => {

@@ -5,6 +5,9 @@ import { PrismaService } from '../../shared/infrastructure/prisma.service';
 import { NightlyReconciliationService } from '../reconciliation/application/nightly-reconciliation.service';
 import { CronGuard } from './cron.guard';
 
+/** docs/portal-events.md B4 */
+export const PORTAL_EVENT_RETENTION_DAYS = 90;
+
 @Controller('cron')
 @UseGuards(CronGuard)
 export class CronController {
@@ -40,11 +43,15 @@ export class CronController {
     return { ...reconciliation, housekeeping, outbox };
   }
 
-  /** Open payments past expiry (Monime never called back) → EXPIRED; old USSD sessions removed. */
+  /**
+   * Open payments past expiry (Monime never called back) → EXPIRED; old USSD sessions
+   * removed; portal events older than 90 days purged (they hold names and phones).
+   */
   @Get('expire-payments')
   async expirePayments() {
     const expired = await this.expire.execute();
     const { count: ussdSessions } = await this.prisma.ussdSession.deleteMany({ where: { updatedAt: { lt: new Date(Date.now() - 24 * 60 * 60_000) } } });
-    return { expired, ussdSessionsDeleted: ussdSessions };
+    const { count: portalEvents } = await this.prisma.portalEvent.deleteMany({ where: { receivedAt: { lt: new Date(Date.now() - PORTAL_EVENT_RETENTION_DAYS * 24 * 60 * 60_000) } } });
+    return { expired, ussdSessionsDeleted: ussdSessions, portalEventsDeleted: portalEvents };
   }
 }

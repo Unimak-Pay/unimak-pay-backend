@@ -106,7 +106,11 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
    - **Preview:** "What would this payer owe?" (`GET /v1/admin/fees/{id}/preview?kind=student|applicant&ref=`) shows eligible, amount, minInstalment and reason.
    - **Re-price** (`fees.manage`): after rate rules change, a "Re-price existing obligations" button on the fee opens `GET /v1/admin/fees/{id}/reprice`. Show the changes (payer, current → proposed, difference), the total difference, the unchanged count and the skipped list with reasons (`PAID`, `HAS_PAYMENTS`, `PAYMENT_IN_PROGRESS`, `NOT_ELIGIBLE`, `NO_RATE_RULE`, `AMBIGUOUS_RATE_RULE`). "Apply" (behind a confirm dialog) calls `POST` and shows the returned report. Hide the button when the preview has no changes. Suggest it after a rate rule is saved or deleted.
 
-5. **Treasury**:
+5. **Portal sync**:
+   - **Needs review** (`GET /v1/admin/payers/needs-review?department=&status=`, `payers.read`): suspended, withdrawn or graduated students who still owe something. Show name, ref, department, level, status and since when, each open obligation's balance and the total. Heads of department and deans get only their departments (the server filters).
+   - **Portal events** (`GET /v1/admin/portal-events?type=&result=&ref=`, `portal.read`): what the portal sent, newest first, with the result (APPLIED, STALE, REJECTED and the error). Show `lastAppliedAt` as sync health ("Last update from the portal: 5 min ago"), in amber after 24 hours.
+
+6. **Treasury**:
    - **Accounts:** list with balances and a refresh button per account (`POST /v1/admin/financial-accounts/{id}/refresh-balance`). **"Create missing accounts"** (`POST /v1/admin/financial-accounts/provision`, `accounts.manage`) sits behind a confirm dialog.
    - **Payouts:**
      - list (`GET /v1/admin/payouts?status=`) and detail;
@@ -117,18 +121,18 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
    - **Commission transfers:** list (`GET /v1/admin/transfers?status=&sort=`), detail (`GET /{id}`), and **Retry** for FAILED ones (`POST /{id}/retry`).
    - **Outbox:** list (`GET /v1/admin/outbox?status=`), detail (`GET /{id}`), and **Retry** for DEAD ones (`POST /{id}/retry`).
 
-6. **Reconciliation** (`reconciliation.read` / `.manage`):
+7. **Reconciliation** (`reconciliation.read` / `.manage`):
    - the summary from `GET /v1/admin/reconciliation`: `counts` are exact, while each list holds at most `listLimit` rows, so link to the full lists below;
    - runs list (`GET /runs?status=`), run detail with its items (`GET /runs/{id}`), and **"Reconcile a day"** (`POST /runs {date}`, default yesterday UTC);
    - items across runs (`GET /items?status=&runId=&kind=`); resolve one (`POST /items/{id}/resolve {resolution}`, with a required note);
    - webhook events list without payloads (`GET /webhook-events?status=&type=&unresolved=`; the cursor is the Monime event id), a viewer with the raw JSON payload (`GET /webhook-events/{id}`), plus **Resolve** (with a note) and **Replay** (FAILED only).
 
-7. **Users** (`users.manage`): list, detail (`GET /v1/admin/users/{id}`), invite (`POST /v1/admin/users`: email, name, role, extraPermissions, `departments` for HEAD_OF_DEPARTMENT, `faculties` for DEAN — both multi-select dropdowns), and edit/deactivate (`PATCH`).
+8. **Users** (`users.manage`): list, detail (`GET /v1/admin/users/{id}`), invite (`POST /v1/admin/users`: email, name, role, extraPermissions, `departments` for HEAD_OF_DEPARTMENT, `faculties` for DEAN — both multi-select dropdowns), and edit/deactivate (`PATCH`).
    - After inviting, show `invitation.status`: `SENT` "Invite email sent to …"; `ALREADY_REGISTERED` "They already have a sign-in and can sign in now"; `NOT_CONFIGURED` / `FAILED` show `invitation.message` as a warning (the admin was still created).
    - Users with `authUserId: null` are "Invited — not signed in yet": offer "Re-send invite" (`POST /v1/admin/users/{id}/invite`; 409 once they've signed in).
    - The server refuses granting what you don't have, deactivating yourself and removing the last super admin. Show its message.
 
-8. **Faculties & departments** (read: any admin; change: `academics.manage`):
+9. **Faculties & departments** (read: any admin; change: `academics.manage`):
    - faculties with their departments (`GET /v1/admin/faculties`), showing inactive ones greyed out;
    - add a faculty (`POST /faculties {code, name}`), rename / deactivate (`PATCH /faculties/{code}`);
    - add a department (`POST /departments {code, name, facultyCode}`), rename / move to another faculty / deactivate (`PATCH /departments/{code}`);
@@ -136,7 +140,7 @@ Build the **UNIMAK Pay admin dashboard**: the web app the University of Makeni (
    - a **Needs review** list (`GET /departments?needsReview=true`) with a badge in the navigation when it isn't empty: set a name and faculty to mark it reviewed;
    - 409 messages (still used by rules or heads of department, faculty has active departments or deans) are shown as they come.
 
-9. **Audit log** (`audit.read`): `GET /v1/admin/audit-log?entity=&entityId=&actorId=`, with before/after JSON diffs. Link to it from detail pages ("History"), filtered by `entity` and `entityId`.
+10. **Audit log** (`audit.read`): `GET /v1/admin/audit-log?entity=&entityId=&actorId=`, with before/after JSON diffs. Link to it from detail pages ("History"), filtered by `entity` and `entityId`.
 
 ## Safety rules (money is real)
 

@@ -28,6 +28,7 @@ export const PERMISSIONS = [
   'users.manage',
   'settings.manage',
   'academics.manage',
+  'portal.read',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -52,7 +53,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly Permission[]> = {
     'payments.read', 'payments.export', 'payments.refund', 'payments.reconcile',
     'receipts.resend',
     'accounts.read', 'payouts.read',
-    'reconciliation.read', 'reconciliation.manage', 'outbox.read', 'outbox.retry',
+    'reconciliation.read', 'reconciliation.manage', 'outbox.read', 'outbox.retry', 'portal.read',
     'reports.read',
   ],
   FINANCE_OFFICER: [

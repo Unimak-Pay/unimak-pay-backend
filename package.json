@@ -20,6 +20,7 @@
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset --force",
     "channel": "tsx --env-file=.env scripts/channel.ts",
+    "portal:event": "tsx --env-file=.env scripts/portal-event.ts",
     "openapi:models": "tsx scripts/openapi-models.ts",
     "openapi:lint": "npx -y @redocly/cli@1.34.3 lint openapi.yaml",
     "openapi:preview": "npx -y @redocly/cli@1.34.3 preview-docs openapi.yaml",

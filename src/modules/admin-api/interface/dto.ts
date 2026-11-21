@@ -304,3 +304,30 @@ export class DepartmentsQuery {
   @IsOptional() @Transform(optionalBool) @IsBoolean()
   active?: boolean;
 }
+
+export class PortalEventsQuery {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(200)
+  limit = 50;
+
+  /** last event id of the previous page */
+  @IsOptional() @Matches(/^[A-Za-z0-9_.:-]{1,100}$/)
+  cursor?: string;
+
+  @IsOptional() @IsIn(['applicant.upserted', 'student.upserted'])
+  type?: string;
+
+  @IsOptional() @IsIn(['APPLIED', 'STALE', 'REJECTED'])
+  result?: 'APPLIED' | 'STALE' | 'REJECTED';
+
+  /** studentId / applicationRef */
+  @IsOptional() @IsString() @Length(1, 64)
+  ref?: string;
+}
+
+export class NeedsReviewQuery extends PageQuery {
+  @IsOptional() @Matches(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/)
+  department?: string;
+
+  @IsOptional() @IsIn(['SUSPENDED', 'WITHDRAWN', 'GRADUATED'])
+  status?: 'SUSPENDED' | 'WITHDRAWN' | 'GRADUATED';
+}

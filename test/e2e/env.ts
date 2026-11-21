@@ -2,7 +2,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { TEST_CLIENT, TEST_CRON_SECRET, TEST_WEBHOOK_SECRET } from './test-env';
+import { TEST_CLIENT, TEST_CRON_SECRET, TEST_PORTAL_SECRET, TEST_PORTAL_SECRET_OLD, TEST_WEBHOOK_SECRET } from './test-env';
 
 const TEST_DATABASE_URL = process.env.E2E_DATABASE_URL;
 if (!TEST_DATABASE_URL) throw new Error('E2E_DATABASE_URL not set (global setup did not run?)');
@@ -42,6 +42,8 @@ Object.assign(process.env, {
   PORTAL_FIXTURES_DIR: fixtures,
   MONIME_MODE: 'mock',
   MONIME_WEBHOOK_SECRET: TEST_WEBHOOK_SECRET,
+  PORTAL_EVENTS_SECRET: TEST_PORTAL_SECRET,
+  PORTAL_EVENTS_SECRET_PREVIOUS: TEST_PORTAL_SECRET_OLD,
   PLATFORM_MONIME_ACCOUNT: 'fa-platform-commission',
   CHANNEL_CLIENTS: JSON.stringify([TEST_CLIENT]),
   CRON_SECRET: TEST_CRON_SECRET,

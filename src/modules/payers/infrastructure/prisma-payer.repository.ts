@@ -19,12 +19,19 @@ export class PrismaPayerRepository implements PayerRepository {
     return r ? toPayer(r) : null;
   }
 
-  async upsertSnapshot(s: PayerSnapshot, at: Date, db: Db = this.prisma): Promise<Payer> {
-    const data = { ...s, snapshotAt: at };
+  async upsertSnapshot(s: PayerSnapshot, at: Date, db: Db = this.prisma, portalUpdatedAt?: Date): Promise<Payer> {
+    const data = { ...s, snapshotAt: at, ...(portalUpdatedAt ? { portalUpdatedAt } : {}) };
+    const update = portalUpdatedAt
+      ? data
+      : {
+          ...data,
+          ...(s.enrolmentStatus === null ? { enrolmentStatus: undefined } : {}),
+          ...(s.applicationRef === null ? { applicationRef: undefined } : {}),
+        };
     const r = await db.payer.upsert({
       where: { kind_ref: { kind: s.kind, ref: s.ref } },
       create: data,
-      update: data,
+      update,
     });
     return toPayer(r);
   }

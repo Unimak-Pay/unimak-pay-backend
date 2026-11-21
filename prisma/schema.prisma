@@ -178,6 +178,13 @@ model PricingConfig {
 
 // ───────────────────────────── Payers & obligations ─────────────────────────────
 
+enum EnrolmentStatus {
+  ACTIVE
+  SUSPENDED
+  WITHDRAWN
+  GRADUATED
+}
+
 model Payer {
   id              String     @id @default(uuid()) @db.Uuid
   kind            PayerKind
@@ -192,6 +199,13 @@ model Payer {
   residency       Residency
   intake          String
   applicantStatus String?
+  /// students: ACTIVE, SUSPENDED, WITHDRAWN, GRADUATED (from portal events); null = not known (treated as active)
+  enrolmentStatus EnrolmentStatus?
+  /// students: the application they came from (links the applicant's payments)
+  applicationRef  String?
+  /// the portal record's own updatedAt from the last event applied; older events are ignored
+  portalUpdatedAt DateTime?
+  /// when we last got this record from the portal (event or lookup)
   snapshotAt      DateTime
 
   obligations Obligation[]
@@ -628,4 +642,27 @@ model MockMonimeRecord {
   data      Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+enum PortalEventResult {
+  APPLIED
+  STALE
+  REJECTED
+}
+
+/// Events the portal pushed to POST /v1/portal/events (docs/portal-events.md). Keyed by the
+/// portal's event id for idempotency; purged after 90 days (they hold names and phones).
+model PortalEvent {
+  id         String            @id
+  type       String
+  /// applicationRef or studentId, when readable
+  ref        String?
+  result     PortalEventResult
+  error      String?
+  data       Json
+  occurredAt DateTime?
+  receivedAt DateTime          @default(now())
+
+  @@index([receivedAt])
+  @@index([ref])
 }

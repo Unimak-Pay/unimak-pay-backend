@@ -17,7 +17,7 @@ import { Document, isMap, isSeq, type YAMLMap } from 'yaml';
 /** Models the admin API returns as rows (alone or with extra fields). */
 export const MODELS = [
   'AdminUser', 'AuditLog', 'Department', 'EligibilityRule', 'Faculty', 'Fee', 'FeeType', 'FinancialAccount', 'InstalmentRule', 'LedgerEntry',
-  'OutboxMessage', 'Payment', 'Payout', 'RateRule', 'ReconciliationItem', 'ReconciliationRun', 'Transfer', 'WebhookEvent',
+  'OutboxMessage', 'Payment', 'Payout', 'PortalEvent', 'RateRule', 'ReconciliationItem', 'ReconciliationRun', 'Transfer', 'WebhookEvent',
 ] as const;
 
 /** Row shapes with fields left out (e.g. lists that omit the payload). */

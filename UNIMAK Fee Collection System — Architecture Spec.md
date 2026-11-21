@@ -55,7 +55,9 @@ The core idea: a **fee** says what is charged and to whom, a **rate rule** says 
 
 **Application fee rule.** The application fee is payable once per application ref, before admission, and it stands whatever the admission outcome. Once it's paid, every channel shows it as Paid and refuses a second payment. Our notify call is what tells the portal it can process the application.
 
-**Obligations, created lazily.** The portal holds the student records, so there's no bulk import. When a payer is looked up on any channel, the backend:
+**Roster from portal events** (owner decision, 2026-11-21; contract in `docs/portal-events.md`). The portal pushes every student and applicant change to `POST /v1/portal/events`; we store the record and create its obligations at once, so billing and "who hasn't paid" cover everyone, not only those who have looked themselves up. Lookups read our store first and only ask the portal about someone we've never seen (or a record not refreshed for 30 days). Students the portal marks SUSPENDED, WITHDRAWN or GRADUATED get no new charges; what they owe stays payable and is listed for review.
+
+**Obligations, created lazily** (still the fallback for anyone the events missed). When a payer is looked up on any channel, the backend:
 
 1. Fetches the student or applicant from the portal API (cached for 10 minutes).
 2. Finds every active fee whose eligibility matches them.

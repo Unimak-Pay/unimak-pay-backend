@@ -24,7 +24,11 @@ export interface ObligationRow {
 
 export interface PayerRepository {
   find(kind: PayerKind, ref: string, db?: Db): Promise<Payer | null>;
-  upsertSnapshot(snapshot: PayerSnapshot, at: Date, db?: Db): Promise<Payer>;
+  /**
+   * Saves what the portal said. A lookup (no portalUpdatedAt) never clears an enrolment
+   * status or application link an event set; an event (with portalUpdatedAt) sets everything.
+   */
+  upsertSnapshot(snapshot: PayerSnapshot, at: Date, db?: Db, portalUpdatedAt?: Date): Promise<Payer>;
   existingObligationRefs(payerId: string, db?: Db): Promise<ExistingObligationRef[]>;
   /** Inserts unless (payer, fee) exists; returns the new id or null. */
   insertObligationIfAbsent(payerId: string, plan: PlannedObligation, db: Db): Promise<string | null>;
