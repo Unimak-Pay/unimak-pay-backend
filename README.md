@@ -123,7 +123,7 @@ pnpm channel POST /v1/channel/payments \
 # 3. Complete it as Monime would (dev only — route absent when NODE_ENV=production)
 curl -XPOST localhost:3100/dev/monime/simulate-webhook -H 'content-type: application/json' \
   -d '{"paymentId":"<paymentId>","outcome":"completed"}'
-#    outcome: completed | failed | expired; optional "amount" (test mismatches), "eventId" (test redelivery)
+#    outcome: processing | completed | failed | expired; optional "amount" (test mismatches), "eventId" (test redelivery)
 #    also {"transferId": …} (commission transfer) and {"payoutId": …} with completed | failed
 
 # 4. Check the result
@@ -135,11 +135,11 @@ cat fixtures/portal/notifications.log.json            # portal.application_paid
 ```
 
 The simulator moves the mock Monime object to its final state, builds the matching
-event (`payment.processing_completed`, `internal_transfer.*`, `payout.*`), signs it
-with `MONIME_WEBHOOK_SECRET` and runs it through the same receiver as
-`POST /webhooks/monime`. For payments, `failed`/`expired` cancel/expire the mock payment
-code and close our payment through reconciliation (we don't subscribe to
-`payment_code.*`).
+event (`payment.processing_started`, `payment.processing_completed`, `internal_transfer.*`,
+`payout.*`), signs it with `MONIME_WEBHOOK_SECRET` and runs it through the same receiver as
+`POST /webhooks/monime`. For payments, `failed`/`expired` only cancel/expire the mock
+payment code: our payment stays as it is (payments don't expire; see
+`docs/payment-lifecycle.md`).
 
 ## API
 
@@ -190,7 +190,7 @@ our public key, not that it is Monime. So the endpoint also:
 
 The money itself is collected by Monime's `collect_payment` template, which the payer
 authorises with their mobile-money PIN, so a forged request can at most create an
-unpaid hold that expires after 15 minutes.
+unpaid payment that holds nothing and is deleted after 7 days.
 
 **Flow** (`ussd/unimak-flow.template.json`, modelled on Monime's own flows):
 
@@ -229,10 +229,13 @@ metadata (`payer_phone` — authorised Dots payment codes carry it), an unmasked
 number, our number if it fits Monime's mask, else Monime's masked number. Never the
 portal phone unverified.
 
-**Once a collection reaches Monime it always completes.** A payment that completes
-after our 15-minute hold expired is still applied (late settlement); if the fee was
-paid again meanwhile, the obligation goes negative and the webhook event is noted
-*Overpaid by …* for a refund or credit.
+**Payments don't expire** (`docs/payment-lifecycle.md`). A new payment is PENDING
+(awaiting payment, holds nothing) until Monime's `payment.processing_started` makes it
+PROCESSING (holds the amount) and `payment.processing_completed` makes it COMPLETED.
+Unpaid ones are deleted after `PENDING_PAYMENT_RETENTION_DAYS` (7), or as soon as another
+payment for the same fee completes; deletions are audited. If the fee was paid twice,
+the obligation goes negative and the webhook event is noted *Overpaid by …* for a refund
+or credit. Money Monime reports for a deleted payment is flagged UNMATCHED, never ignored.
 
 **Setup**
 
@@ -372,7 +375,7 @@ a Vercel Firewall rate-limit rule on `/v1/dot/` for a global one.
 | GET | `/payers/:kind/:ref/pay-requests` | a payer's requests (alias must match) |
 | GET | `/payers/:kind/:ref/clearance` | exam clearance (students; alias must match); a CLEARED pass links to `/c/{code}`, which re-checks live |
 
-`POST /payments` holds the amount (15 min) and records a PENDING payment with collection
+`POST /payments` records a PENDING payment (it never expires; see `docs/payment-lifecycle.md`) with collection
 method `DASH_SHEET`; it makes no Monime call. The dot passes `order` and
 `financialAccountId` unchanged to `dash.payments.request()`. `order.reference` is our
 payment id, so Monime's `payment.processing_completed` settles it like any other payment
@@ -464,11 +467,10 @@ Minimal HTML receipt check (masked name, amount, fee, date). `noindex`, `no-stor
 5 minutes, reconciliation nightly at 01:00 UTC; the nightly call also runs the expiry
 and outbox sweeps (the fallback where only daily crons are allowed).
 
-**Stale payments are cleared automatically.** An open payment past `expiresAt` (Monime
-never called our webhook) becomes `EXPIRED`: every 5 minutes by a Supabase `pg_cron`
-job (migration `expire_payments_job`; skipped on Postgres without pg_cron), by
-`/cron/expire-payments`, and nightly. Holds stop counting at `expiresAt` anyway. If
-the webhook arrives later the payment is still applied (late settlement).
+**Payment housekeeping.** `/cron/expire-payments` (and the nightly run) puts a PROCESSING
+payment with no completion for 24 h back to PENDING, and deletes payments still awaiting
+payment after `PENDING_PAYMENT_RETENTION_DAYS` (default 7), audited. Nothing expires; the
+old `pg_cron` expiry job is unscheduled by migration `payment_processing`.
 
 ## Nightly reconciliation
 
@@ -561,8 +563,8 @@ All paths route to that function; the Nest app is cached across invocations.
 
 Crons come from `vercel-crons.json` (outbox and expiry every 5 min, reconciliation
 01:00 UTC). The Hobby plan only allows daily crons: build with `VERCEL_CRONS=daily`
-there (only reconciliation is kept). Payment expiry still runs every 5 minutes in
-the database (`pg_cron`); the outbox is dispatched inline after each webhook, and
+there (only reconciliation is kept, which also runs the payment housekeeping); the
+outbox is dispatched inline after each webhook, and
 anything left over goes with the nightly run.
 
 Check a build locally: `VERCEL_CRONS=daily node scripts/vercel-build.mjs` (keeps the

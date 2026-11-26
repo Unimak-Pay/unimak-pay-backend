@@ -69,7 +69,7 @@ The admin can also pre-generate obligations for a cohort through the portal's co
 
 **Ledger.** Each `LedgerEntry` is a charge (+), a payment (−), an adjustment (±: waiver, scholarship, correction) or a refund (+). For any obligation, balance = sum of entries. Status comes from the balance: unpaid, partial, paid or overpaid. Entries are never edited; a mistake is fixed with a reversing entry.
 
-**Payment.** One attempt through Monime. Statuses: `initiated → pending → completed | failed | expired`. Only a completed payment writes a ledger entry. While a payment is pending, its amount counts as a hold, so the payable amount is balance minus holds.
+**Payment.** One attempt through Monime. Statuses: `pending → processing → completed` (owner decision 2026-11-28, `docs/payment-lifecycle.md`). A pending payment awaits payment, never expires and holds nothing; it is deleted after 7 days unpaid, or when another payment for the same fee completes. Monime's `payment.processing_started` makes it processing, and only then does its amount count as a hold (for 24 hours), so the payable amount is balance minus holds. Only a completed payment writes a ledger entry. (`failed` is a payment code Monime rejected; `expired` exists only on payments from before.)
 
 **Receipt.** Issued once per completed payment. The number looks like `UNIMAK-2026-000123`, and each receipt has a public verification code with a URL and QR.
 
@@ -86,7 +86,7 @@ enum Residency { LOCAL INTERNATIONAL }
 enum Recurrence { ONCE PER_YEAR }
 enum FeeStatus { DRAFT ACTIVE CLOSED }
 enum EntryKind { CHARGE PAYMENT ADJUSTMENT REFUND }
-enum PaymentStatus { INITIATED PENDING COMPLETED FAILED EXPIRED }
+enum PaymentStatus { INITIATED PENDING PROCESSING COMPLETED FAILED EXPIRED }
 enum Channel { USSD DOTS ADMIN }
 enum OutboxStatus { PENDING SENT FAILED DEAD }
 
@@ -268,10 +268,10 @@ The `@@unique([payerId, feeId])` on `Obligation` is what makes lazy creation saf
 The Monime webhook is the only thing that marks a payment completed. Channel sessions only start payments; they never confirm them.
 
 1. **Quote.** The channel sends payer + fee. The backend returns the balance, the holds, the payable amount and the minimum instalment.
-2. **Initiate.** In one transaction: `SELECT … FOR UPDATE` on the obligation row, check that the program's minimum instalment ≤ amount ≤ balance − holds, insert a `Payment` (status `INITIATED`, `expiresAt` = now + 15 min, `idempotencyKey` from the channel), then call Monime to collect (a USSD push or payment code to `payerPhone`) and store `monimeRef`. The status becomes `PENDING`.
+2. **Initiate.** In one transaction: `SELECT … FOR UPDATE` on the obligation row, check that the program's minimum instalment ≤ amount ≤ balance − holds, insert a `Payment` (status `INITIATED`, `expiresAt` = now + 7 days, when it is deleted if unpaid; `idempotencyKey` from the channel), then call Monime to collect (a USSD push or payment code to `payerPhone`) and store `monimeRef`. The status becomes `PENDING`.
 3. **Webhook.** `POST /webhooks/monime`: verify the signature, then insert a `WebhookEvent` keyed by the event id (a duplicate returns 200 and does nothing), then process.
 4. **Settle.** In one transaction: payment → `COMPLETED`, insert a `LedgerEntry(PAYMENT, −amount, paymentId)` (unique on paymentId, so it is never applied twice), issue the `Receipt`, and write outbox messages (`sms.receipt`, plus `portal.application_paid` for application fees).
-5. **Fail or expire.** A failed webhook, or the expiry sweep, sets `FAILED` / `EXPIRED`, which releases the hold.
+5. **Processing and cleanup.** `payment.processing_started` sets `PROCESSING` (the hold). With no completion in 24 hours it goes back to `PENDING`. Payments still pending after 7 days, or whose fee was paid by another payment, are deleted (audited).
 6. **Notify the portal.** The outbox worker POSTs to the portal with an idempotency key (the payment id). It retries with backoff (1 min, 5 min, 30 min, 2 h, 12 h), and after 6 attempts moves the message to `DEAD`, which shows on the admin dashboard.
 7. **Reconcile.** A nightly job lists the day's Monime transactions and compares them with completed payments. A mismatch, such as a missed webhook, is either auto-settled through the same step 4 or flagged.
 
@@ -422,7 +422,7 @@ Vercel works if the backend is designed around two things: there are no long-run
 3. **Prisma through the pooler.** Point `DATABASE_URL` at Supabase's transaction pooler (port 6543, `?pgbouncer=true&connection_limit=1`), and use `DIRECT_URL` for migrations. Without the pooler, serverless bursts exhaust Postgres connections.
 4. **Background work = outbox + cron.** After a webhook commits, try sending its outbox messages inline (best effort). A cron endpoint then sweeps whatever is left. Scheduled routes, all protected by a `CRON_SECRET`:
    - `/cron/outbox`, every minute: portal notifications and SMS retries
-   - `/cron/expire-payments`, every 5 minutes: release stale holds
+   - `/cron/expire-payments`, every 5 minutes: stale PROCESSING back to PENDING; delete payments unpaid after 7 days
    - `/cron/reconcile`, nightly: compare with Monime Vercel Cron needs the Pro plan for per-minute schedules, and Hobby doesn't allow commercial use anyway. Supabase `pg_cron` + `pg_net` calling the same routes is a fallback.
 5. **USSD time budget.** Portal calls on the USSD path get a 1.5 s timeout, then fall back to the snapshot. The Monime collection call is the last step before the session ends. Anything slow (SMS, portal notify) goes to the outbox, never inline.
 

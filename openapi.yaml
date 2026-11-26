@@ -215,7 +215,8 @@ paths:
       tags: [Channel]
       summary: Start a payment
       description: |
-        Places a hold on the obligation and creates a Monime payment code (15 minutes).
+        Creates a PENDING payment (awaiting payment: it never expires and holds nothing; deleted after 7 days if
+        unpaid, see docs/payment-lifecycle.md) and a Monime payment code. `expiresAt` = when it is deleted if unpaid.
         The payer approves by dialling `ussdCode`. Idempotent per client on `idempotencyKey`:
         repeating the call returns the same payment (and retries Monime if it never got through).
         Give the payer `paymentRef` to check the status later.
@@ -347,7 +348,8 @@ paths:
       tags: [Dash dot]
       summary: Start a payment and get the order for Dash's payment sheet
       description: |
-        Holds the amount on the obligation (15 minutes) and returns `order` and `financialAccountId`
+        Records a PENDING payment (never expires, holds nothing; `expiresAt` = when it is deleted if still unpaid)
+        and returns `order` and `financialAccountId`
         to pass unchanged to `dash.payments.request()`. No Monime call is made here.
         Idempotent on the `Idempotency-Key` header: a retry returns the same payment and order
         (409 `IDEMPOTENCY_CONFLICT` if the key was used for a different obligation or amount).
@@ -556,7 +558,7 @@ paths:
       summary: Monime webhook
       description: |
         Signed with `Monime-Signature: t=<unix>,v1=<base64 HMAC-SHA256(secret, "<t>_" + raw body)>`.
-        Events: `payment.processing_completed`, `internal_transfer.completed|failed`,
+        Events: `payment.processing_started` (→ PROCESSING), `payment.processing_completed`, `internal_transfer.completed|failed`,
         `payout.completed|failed`, `financial_account.credited|debited`. Deduplicated on
         `event.id`; business mismatches are acknowledged (200) and queued for reconciliation.
       security: [{ monimeSignature: [] }]
@@ -701,15 +703,17 @@ paths:
     get:
       operationId: cronExpirePayments
       tags: [Cron]
-      summary: Expire open payments past expiresAt; delete USSD sessions older than 24 h
-      description: Also runs every 5 minutes in the database (Supabase pg_cron) and nightly.
+      summary: Payment housekeeping; delete USSD sessions older than 24 h
+      description: |
+        Payments don't expire. PROCESSING with no completion for 24 h goes back to PENDING; payments still
+        awaiting payment after PENDING_PAYMENT_RETENTION_DAYS are deleted (audited). Also runs nightly.
       security: [{ cronSecret: [] }]
       responses:
         '200':
           description: Counts
           content:
             application/json:
-              schema: { type: object, properties: { expired: { type: integer }, ussdSessionsDeleted: { type: integer } } }
+              schema: { type: object, properties: { processingReset: { type: integer }, pendingDeleted: { type: integer }, ussdSessionsDeleted: { type: integer }, portalEventsDeleted: { type: integer } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /cron/reconcile:
@@ -728,7 +732,7 @@ paths:
                 properties:
                   skipped: { type: boolean }
                   runId: { type: string, format: uuid }
-                  housekeeping: { type: object, properties: { expired: { type: integer }, ussdSessionsDeleted: { type: integer } } }
+                  housekeeping: { type: object, properties: { processingReset: { type: integer }, pendingDeleted: { type: integer }, ussdSessionsDeleted: { type: integer }, portalEventsDeleted: { type: integer } } }
                   outbox: { type: object, additionalProperties: { type: integer } }
                 additionalProperties: true
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -1244,8 +1248,9 @@ paths:
         - **collected**: COMPLETED payments by `completedAt` in the range (a late settlement counts on
           the day Monime completed it). `monimeFees + platformFees + net = amount`.
         - **byDay**: every day of the range, zero-filled. Days are UTC (= Africa/Freetown).
-        - **payments**: the funnel of payments *started* in the range, by current status. An open
-          payment past expiry counts as expired.
+        - **payments**: the funnel of payments *started* in the range, by current status (pending =
+          awaiting payment, processing = Monime is processing it). Payments don't expire; unpaid ones are
+          deleted after 7 days, so they leave the funnel.
         - **byFaculty** / **byDepartment**: collected, by the payer's department and that department's
           *current* faculty (`facultyCode: null` = department without a faculty yet, or no department).
         - **commission** / **payouts**: transfers / payouts created in the range. They are `null` unless
@@ -1438,7 +1443,7 @@ paths:
       operationId: adminReconcilePayment
       tags: [Admin · Payments]
       summary: Ask Monime about an open payment
-      description: Closes it if its payment code expired or was cancelled. Completion only ever comes from Monime's webhook.
+      description: Reports what Monime says about the payment code; never changes the payment (payments don't expire). Completion only ever comes from Monime's webhook or the nightly reconciliation.
       x-permission: payments.reconcile
       security: [{ adminJwt: [] }]
       parameters: [{ $ref: '#/components/parameters/Id' }]
@@ -2161,7 +2166,7 @@ paths:
                 paymentId: { type: string, format: uuid }
                 transferId: { type: string, format: uuid }
                 payoutId: { type: string, format: uuid }
-                outcome: { type: string, enum: [completed, failed, expired] }
+                outcome: { type: string, enum: [processing, completed, failed, expired] }
                 amount: { $ref: '#/components/schemas/MinorAmount' }
                 payerPhone: { type: string, pattern: '^\+\d{8,15}$', description: 'Reported masked, like Monime.' }
                 metadata: { type: object, additionalProperties: { type: string } }
