@@ -312,6 +312,7 @@ they don't hold, and only super admins manage super admins. Every write is recor
 | GET | `/reports/outstanding?feeId=&feeType=&period=&faculty=&department=&level=&includeInactive=` — billed / collected / outstanding by department × level, per fee, applicants by status, active students with no obligation | `reports.read` |
 | GET | `/payers?…same filters…&kind=&standing=PAID\|PART_PAID\|UNPAID\|NOT_BILLED\|OVERDUE&enrolmentStatus=&q=&sort=-balance\|balance\|name\|ref` — who owes what (phones masked); `/payers/export.csv` the same as CSV, audited | `payers.read` / + `payments.export` |
 | GET | `/payers/:id` — one payer: record (full phone), linked applicant/student, obligations with ledger and payments, receipts, portal events | `payers.read` |
+| GET | `/receipts?from=&to=&feeType=&faculty=&department=&channel=&payerRef=&q=` (q = receipt number, payment ref or Monime order number), `/receipts/:number` (with the payment split) — scoped for heads of department and deans | `payments.read` |
 | GET | `/audit-log` | `audit.read` |
 
 Lists are cursor-paginated (`?limit=&cursor=` → `{ items, nextCursor }`); money is a
@@ -369,6 +370,7 @@ a Vercel Firewall rate-limit rule on `/v1/dot/` for a global one.
 | POST | `/payments` | `{obligationId, amount, payRequestCode?, paidByName?, payingForSelf?}` + `Idempotency-Key` header → `{paymentId, paymentRef, status, amount, expiresAt, order, financialAccountId}` |
 | GET | `/payments/status/:ref` | by `paymentRef` or Monime's order number (payer masked) |
 | GET | `/payers/:kind/:ref/payments` | history (alias must match): completed, open, failed/expired from the last 30 days; `totalPaid` for the academic year |
+| GET | `/payers/:kind/:ref/receipts` | every receipt of the payer, newest first (alias must match) |
 | GET | `/payments/:paymentRef/receipt` | 404 until Monime completed it; `verifyUrl` = `/r/{verifyCode}`; `pdfUrl` null for now |
 | POST | `/pay-requests` | ask someone to pay (alias must match; `Idempotency-Key`) |
 | GET | `/pay-requests/:code` | the sponsor's page (no match needed: the code is the secret); records `openedAt` |

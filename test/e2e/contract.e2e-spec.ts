@@ -183,6 +183,9 @@ describe('admin API responses match openapi.yaml', () => {
     const list = conforms('get', '/v1/admin/payments', await as('get', '/v1/admin/payments?limit=3&sort=-amount').expect(200));
     expect((list.items as unknown[]).length).toBeGreaterThan(0);
     const detail = conforms('get', '/v1/admin/payments/{id}', await as('get', `/v1/admin/payments/${paymentId}`).expect(200));
+    const receipts = conforms('get', '/v1/admin/receipts', await as('get', '/v1/admin/receipts?limit=3').expect(200));
+    expect((receipts.items as Json[]).length).toBeGreaterThan(0);
+    conforms('get', '/v1/admin/receipts/{number}', await as('get', `/v1/admin/receipts/${(receipts.items as Json[])[0]!.number}`).expect(200));
     expect(detail.ledgerEntry).not.toBeNull();
     transferId = (detail.commissionTransfer as Json).id as string;
     conforms('post', '/v1/admin/payments/{id}/reconcile', await as('post', `/v1/admin/payments/${paymentId}/reconcile`).expect(200));

@@ -1,3 +1,4 @@
+import { normalizeReceiptNumber } from './receipt-number';
 import { formatReceiptNumber, generateVerifyCode, isVerifyCodeShape } from './receipt';
 
 describe('receipts', () => {
@@ -10,5 +11,16 @@ describe('receipts', () => {
     expect(c).toHaveLength(10);
     expect(isVerifyCodeShape(c)).toBe(true);
     expect(isVerifyCodeShape('ABC0OI1L00')).toBe(false);
+  });
+});
+
+describe('normalizeReceiptNumber', () => {
+  it('ignores case, spaces and dashes', () => {
+    expect(normalizeReceiptNumber('unimak 2026 000123')).toBe('UNIMAK-2026-000123');
+    expect(normalizeReceiptNumber('UNIMAK-2026-000123')).toBe('UNIMAK-2026-000123');
+  });
+  it('null for anything else', () => {
+    expect(normalizeReceiptNumber('15540719')).toBeNull();
+    expect(normalizeReceiptNumber('UNIMAK-2026-12')).toBeNull();
   });
 });

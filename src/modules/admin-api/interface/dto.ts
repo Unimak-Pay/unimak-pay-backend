@@ -408,3 +408,32 @@ export class ClearancePolicyDto {
   @IsBoolean()
   includeOverdue!: boolean;
 }
+
+/** GET /v1/admin/receipts */
+export class ReceiptsQuery extends PageQuery {
+  /** YYYY-MM-DD, inclusive, by issue date */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from?: string;
+
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to?: string;
+
+  @IsOptional() @Matches(CODE)
+  feeType?: string;
+
+  @IsOptional() @Matches(CODE)
+  faculty?: string;
+
+  @IsOptional() @Matches(CODE)
+  department?: string;
+
+  @IsOptional() @IsIn(['USSD', 'DOTS'])
+  channel?: 'USSD' | 'DOTS';
+
+  @IsOptional() @IsString() @Length(1, 64)
+  payerRef?: string;
+
+  /** receipt number, payment ref or Monime order number */
+  @IsOptional() @IsString() @Length(1, 40)
+  q?: string;
+}

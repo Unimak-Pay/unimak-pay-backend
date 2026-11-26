@@ -245,3 +245,58 @@ describe('email in admin views', () => {
     expect(detail.body.payer.email).toBe('Analytics.406@Example.com');
   });
 });
+
+describe('admin receipts', () => {
+  type R = { id: string; number: string; payer: { ref: string }; payment: { paymentRef: string } };
+  const list = async (who: typeof bursar, qs: string) => (await who.get(`/v1/admin/receipts?${qs}`).expect(200)).body as { items: R[]; nextCursor: string | null };
+  let part: R;
+
+  beforeAll(async () => {
+    await pay(NURSE, feeId, '1000');
+    part = (await list(bursar, `payerRef=${PART}`)).items[0]!;
+  });
+
+  it('lists receipts with payer, fee and payment, newest first', async () => {
+    expect(part).toMatchObject({
+      number: expect.stringMatching(/^UNIMAK-\d{4}-\d{6}$/), amount: '10000', verifyUrl: expect.stringMatching(/\/r\/\w{10}$/),
+      payer: { kind: 'STUDENT', ref: PART, fullName: 'Analytics 402', department: 'COMPUTER-SCI', departmentName: expect.any(String) },
+      fee: { id: feeId, feeTypeCode: 'ANA', period: '2026/27' },
+      payment: { paymentRef: expect.stringMatching(/^\d{8}$/), channel: 'USSD', method: 'Mobile money', paidBy: { name: null, self: false } },
+    });
+    const ana = await list(bursar, 'feeType=ANA');
+    expect(ana.items.map((r) => r.payer.ref).sort()).toEqual([NURSE, PART, PAID].sort());
+    const first = await list(bursar, 'feeType=ANA&limit=1');
+    const second = await list(bursar, `feeType=ANA&limit=1&cursor=${first.nextCursor}`);
+    expect(second.items[0]!.id).not.toBe(first.items[0]!.id);
+    expect((await list(bursar, 'feeType=ANA&department=NURSING')).items.map((r) => r.payer.ref)).toEqual([NURSE]);
+    const today = new Date().toISOString().slice(0, 10);
+    expect((await list(bursar, `feeType=ANA&from=${today}&to=${today}`)).items).toHaveLength(3);
+    expect((await list(bursar, 'feeType=ANA&to=2020-01-01')).items).toHaveLength(0);
+  });
+
+  it('finds one by receipt number, payment ref or Monime order number', async () => {
+    const spaced = part.number.toLowerCase().replace(/-/g, ' ');
+    for (const q of [spaced, part.payment.paymentRef, `MO${part.payment.paymentRef}`]) {
+      expect((await list(bursar, `q=${encodeURIComponent(q)}`)).items.map((r) => r.id)).toEqual([part.id]);
+    }
+    expect((await list(bursar, 'q=nothing-like-it')).items).toEqual([]);
+  });
+
+  it('shows one receipt with the payment split', async () => {
+    const res = await bursar.get(`/v1/admin/receipts/${part.number.toLowerCase()}`).expect(200);
+    expect(res.body).toMatchObject({
+      id: part.id, number: part.number,
+      payment: { paymentRef: part.payment.paymentRef, amount: '10000', monimeFee: expect.any(String), platformFee: expect.any(String), netAmount: expect.any(String), monimeOrderNumber: `MO${part.payment.paymentRef}`, completedAt: expect.any(String) },
+    });
+    await bursar.get('/v1/admin/receipts/UNIMAK-1999-000001').expect(404);
+    await bursar.get('/v1/admin/receipts/nope').expect(404);
+    await bursar.get('/v1/admin/receipts?from=yesterday').expect(400);
+  });
+
+  it('heads of department only see their departments', async () => {
+    expect((await list(hod, 'feeType=ANA')).items.map((r) => r.payer.ref).sort()).toEqual([PART, PAID].sort());
+    const nurse = (await list(bursar, `payerRef=${NURSE}`)).items[0]!;
+    await hod.get(`/v1/admin/receipts/${nurse.number}`).expect(404);
+    await hod.get(`/v1/admin/receipts/${part.number}`).expect(200);
+  });
+});

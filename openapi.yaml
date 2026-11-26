@@ -53,6 +53,8 @@ tags:
       `reference` = our payment id) is the only thing that marks it paid.
   - name: Admin · Reports
     description: Collection totals for the dashboard.
+  - name: Admin · Receipts
+    description: Receipts by date, fee, department or payer; one receipt by its number.
   - name: Admin · Payers
     description: Who owes what, by department and level, down to one student (docs/analytics.md).
   - name: Admin · Payments
@@ -1105,6 +1107,59 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v1/admin/receipts:
+    get:
+      operationId: adminListReceipts
+      tags: [Admin · Receipts]
+      summary: Receipts, newest first
+      description: |
+        `q` finds a receipt by its number (case, spaces and dashes ignored), its payment ref or the Monime
+        order number. Dates are issue dates (UTC = Africa/Freetown), inclusive. Heads of department and
+        deans only see receipts of students in their departments.
+      x-permission: payments.read
+      security: [{ adminJwt: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid }, description: '`nextCursor` from the previous page' }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: feeType, in: query, schema: { type: string, maxLength: 40 } }
+        - $ref: '#/components/parameters/FacultyFilter'
+        - $ref: '#/components/parameters/DepartmentFilter'
+        - { name: channel, in: query, schema: { $ref: '#/components/schemas/Channel' } }
+        - { name: payerRef, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: q, in: query, schema: { type: string, maxLength: 40 }, examples: { receipt: { value: UNIMAK-2026-000123 }, paymentRef: { value: '15540719' } } }
+      responses:
+        '200':
+          description: Page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AdminReceipt' } }
+                  nextCursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v1/admin/receipts/{number}:
+    get:
+      operationId: adminGetReceipt
+      tags: [Admin · Receipts]
+      summary: One receipt by its number, with the payment split
+      description: '404 for an unknown number, or one outside a head of department''s or dean''s departments.'
+      x-permission: payments.read
+      security: [{ adminJwt: [] }]
+      parameters:
+        - { name: number, in: path, required: true, schema: { type: string, example: UNIMAK-2026-000123 } }
+      responses:
+        '200': { description: Receipt, content: { application/json: { schema: { $ref: '#/components/schemas/AdminReceiptDetail' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /v1/admin/audit-log:
     get:
@@ -2367,6 +2422,67 @@ components:
         payRequestCode: { type: string, maxLength: 20, description: 'Pay through this pay request (dot 0.2.3+).' }
         paidByName: { type: string, maxLength: 40, description: "Payer's first name, display only; anything after the first word is dropped." }
         payingForSelf: { type: boolean, description: 'true when the student saved on that phone is paying; display only. Default false.' }
+    AdminReceipt:
+      type: object
+      required: [id, number, amount, issuedAt, verifyUrl, payer, fee, obligationId, payment]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, example: UNIMAK-2026-000123 }
+        amount: { type: string, description: 'SLE minor units' }
+        issuedAt: { type: string, format: date-time }
+        verifyUrl: { type: string, format: uri }
+        payer:
+          type: object
+          required: [id, kind, ref, fullName, department, departmentName, facultyCode, facultyName]
+          properties:
+            id: { type: string, format: uuid }
+            kind: { type: string, enum: [STUDENT, APPLICANT] }
+            ref: { type: string }
+            fullName: { type: string }
+            department: { type: [string, 'null'] }
+            departmentName: { type: [string, 'null'] }
+            facultyCode: { type: [string, 'null'] }
+            facultyName: { type: [string, 'null'] }
+        fee:
+          type: object
+          required: [id, name, period, feeTypeCode]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            period: { type: string }
+            feeTypeCode: { type: string }
+        obligationId: { type: string, format: uuid }
+        payment:
+          type: object
+          required: [id, paymentRef, channel, method, paidBy]
+          properties:
+            id: { type: string, format: uuid }
+            paymentRef: { $ref: '#/components/schemas/PaymentRef' }
+            channel: { $ref: '#/components/schemas/Channel' }
+            method: { $ref: '#/components/schemas/PaymentMethodLabel' }
+            paidBy: { $ref: '#/components/schemas/PaidBy' }
+    AdminReceiptDetail:
+      allOf:
+        - $ref: '#/components/schemas/AdminReceipt'
+        - type: object
+          properties:
+            payment:
+              type: object
+              required: [id, paymentRef, channel, method, paidBy, amount, monimeFee, platformFee, netAmount, monimeOrderNumber, monimePaymentId, createdAt, completedAt]
+              properties:
+                id: { type: string, format: uuid }
+                paymentRef: { $ref: '#/components/schemas/PaymentRef' }
+                channel: { $ref: '#/components/schemas/Channel' }
+                method: { $ref: '#/components/schemas/PaymentMethodLabel' }
+                paidBy: { $ref: '#/components/schemas/PaidBy' }
+                amount: { type: string, description: 'SLE minor units' }
+                monimeFee: { type: string }
+                platformFee: { type: string }
+                netAmount: { type: string }
+                monimeOrderNumber: { type: [string, 'null'] }
+                monimePaymentId: { type: [string, 'null'] }
+                createdAt: { type: string, format: date-time }
+                completedAt: { type: [string, 'null'], format: date-time }
     PaidBy:
       type: object
       required: [name, self]
