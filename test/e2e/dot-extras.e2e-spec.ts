@@ -274,3 +274,85 @@ describe('payment history and receipts', () => {
     expect((await dot(ip()).get(`/v1/dot/payers/student/${ME}/payments`).expect(403)).body.error.code).toBe('ALIAS_REQUIRED');
   });
 });
+
+describe('exam clearance', () => {
+  const mine = () => dot(ip(), aliasOf(ME));
+  let obligationId: string;
+  let original: Awaited<ReturnType<typeof prisma.clearancePolicy.findUniqueOrThrow>>;
+  const admin = async (role: 'BURSAR' | 'FINANCE_OFFICER') => {
+    const email = `${role.toLowerCase()}-${randomUUID().slice(0, 8)}@unimak.test`;
+    const u = await prisma.adminUser.create({ data: { email, role } });
+    const token = adminToken({ sub: randomUUID(), email, aal: 'aal2' });
+    return { id: u.id, get: (url: string) => http.get(url).set('authorization', `Bearer ${token}`), put: (url: string, body: object) => http.put(url).set('authorization', `Bearer ${token}`).send(body) };
+  };
+
+  beforeAll(async () => {
+    obligationId = await obligationOf(ME);
+    original = await prisma.clearancePolicy.findUniqueOrThrow({ where: { id: 'current' } });
+  });
+
+  afterAll(async () => {
+    // leave the shared database's placeholder rule as it was
+    const { updatedAt: _u, ...rest } = original;
+    await prisma.clearancePolicy.update({ where: { id: 'current' }, data: rest });
+  });
+
+  it('starts as a clearly marked placeholder', () => {
+    expect(original).toMatchObject({ examName: 'First semester exams', period: '2026/27', placeholder: true });
+  });
+
+  it('the finance office sets the rule; audited; validated', async () => {
+    const bursar = await admin('BURSAR');
+    const res = await bursar.put('/v1/admin/clearance-policy', { examName: 'DXT exams', period: '2026/27', feeTypeCodes: ['DXT'], includeOverdue: false }).expect(200);
+    expect(res.body).toMatchObject({ examName: 'DXT exams', feeTypeCodes: ['DXT'], includeOverdue: false, placeholder: false, updatedBy: `admin:${bursar.id}` });
+    expect(await prisma.auditLog.count({ where: { actorId: bursar.id, action: 'clearance_policy.update' } })).toBe(1);
+    await bursar.put('/v1/admin/clearance-policy', { examName: 'X', period: '2026/27', feeTypeCodes: ['NOPE'], includeOverdue: false }).expect(400);
+    await bursar.put('/v1/admin/clearance-policy', { examName: 'X', period: '2026/27', feeTypeCodes: [], includeOverdue: false }).expect(400);
+    const officer = await admin('FINANCE_OFFICER');
+    await officer.put('/v1/admin/clearance-policy', { examName: 'X', period: '2026/27', feeTypeCodes: ['DXT'], includeOverdue: false }).expect(403);
+    expect((await bursar.get('/v1/admin/clearance-policy').expect(200)).body.examName).toBe('DXT exams');
+  });
+
+  it('NOT_CLEARED lists what blocks it; money held by an open payment does not count', async () => {
+    const res = await mine().get(`/v1/dot/payers/student/${ME}/clearance`).expect(200);
+    // 30,000 billed − 25,000 completed; the open 1,000 payment is still owed
+    expect(res.body).toEqual({
+      status: 'NOT_CLEARED', exam: { name: 'DXT exams', period: '2026/27' },
+      outstanding: { value: '5000', display: 'SLE 50.00' },
+      blocking: [{ obligationId, feeName: 'Dot extras 2026/27', balance: { value: '5000', display: 'SLE 50.00' } }],
+      passCode: null, verifyUrl: null, issuedAt: null,
+    });
+  });
+
+  it('CLEARED once paid, with a pass whose public page checks live', async () => {
+    const open = await prisma.payment.findUniqueOrThrow({ where: { clientId_idempotencyKey: { clientId: 'dash-dot', idempotencyKey: 'pay-dxt-0006' } } });
+    await complete(open.id);
+    const last = await mine().post('/v1/dot/payments', { obligationId, amount: '4000', payingForSelf: true }, 'pay-dxt-clear-01').expect(201);
+    await complete(last.body.paymentId);
+
+    const res = await mine().get(`/v1/dot/payers/student/${ME}/clearance`).expect(200);
+    expect(res.body).toMatchObject({ status: 'CLEARED', outstanding: { value: '0' }, blocking: [], passCode: expect.stringMatching(/^[2-9A-HJKMNP-Z]{8}$/), issuedAt: expect.any(String) });
+    expect(res.body.verifyUrl).toMatch(new RegExp(`/c/${res.body.passCode}$`));
+    const again = await mine().get(`/v1/dot/payers/student/${ME}/clearance`).expect(200);
+    expect(again.body.passCode).toBe(res.body.passCode);
+
+    const path = new URL(res.body.verifyUrl).pathname;
+    const ok = await http.get(path).expect(200);
+    expect(ok.text).toContain('✓ Cleared for DXT exams (2026/27)');
+    expect(ok.text).toContain('Abdul Dxt501 Koroma');
+    expect(ok.text).not.toMatch(/76500501|\+232/);
+    expect(ok.headers['cache-control']).toBe('no-store');
+
+    // status changes (a new charge): the same pass now reads not cleared
+    await prisma.ledgerEntry.create({ data: { obligationId, type: 'ADJUSTMENT', amount: 1000n, memo: 'e2e: extra charge', createdBy: 'e2e' } });
+    expect((await http.get(path).expect(200)).text).toContain('✗ Not cleared');
+    expect((await mine().get(`/v1/dot/payers/student/${ME}/clearance`).expect(200)).body).toMatchObject({ status: 'NOT_CLEARED', passCode: null });
+    await http.get('/c/ZZZZZZZZ').expect(404);
+  });
+
+  it('needs the student’s number; applicants get 404', async () => {
+    await dot(ip(), '+232 77 999999').get(`/v1/dot/payers/student/${ME}/clearance`).expect(403);
+    await dot(ip()).get(`/v1/dot/payers/student/${ME}/clearance`).expect(403);
+    await dot(ip(), aliasOf(ME)).get('/v1/dot/payers/applicant/APP-2026-0003/clearance').expect(404);
+  });
+});

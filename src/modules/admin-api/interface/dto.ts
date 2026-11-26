@@ -391,3 +391,20 @@ export class PayersQuery extends PayersExportQuery {
   @IsOptional() @IsString() @Length(1, 400)
   cursor?: string;
 }
+
+/** PUT /v1/admin/clearance-policy (docs/dot-extras.md §4). */
+export class ClearancePolicyDto {
+  @IsString() @Length(1, 80)
+  examName!: string;
+
+  /** e.g. "2026/27": the period whose listed fees must be paid */
+  @IsString() @Length(1, 20)
+  period!: string;
+
+  @IsArray() @ArrayMaxSize(20) @Matches(CODE, { each: true })
+  feeTypeCodes!: string[];
+
+  /** any fee past its due date must also be paid */
+  @IsBoolean()
+  includeOverdue!: boolean;
+}

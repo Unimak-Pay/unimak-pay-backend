@@ -157,6 +157,11 @@ describe('admin API responses match openapi.yaml', () => {
     expect(csv.headers['content-disposition']).toMatch(/^attachment; filename="unimak-payers-\d{4}-\d{2}-\d{2}\.csv"$/);
     expect(csv.text.trimEnd().split('\r\n')).toHaveLength(2);
     checked.add('GET /v1/admin/payers/export.csv');
+
+    // exam clearance rule (put back as it was: other files share the database)
+    const rule = conforms('get', '/v1/admin/clearance-policy', await as('get', '/v1/admin/clearance-policy').expect(200));
+    conforms('put', '/v1/admin/clearance-policy', await as('put', '/v1/admin/clearance-policy', { examName: rule.examName, period: rule.period, feeTypeCodes: rule.feeTypeCodes, includeOverdue: rule.includeOverdue }).expect(200));
+    await prisma.clearancePolicy.update({ where: { id: 'current' }, data: { placeholder: rule.placeholder, updatedBy: rule.updatedBy } });
   });
 
   it('faculties and departments', async () => {

@@ -105,6 +105,24 @@ paths:
         '200': { description: Valid receipt, content: { text/html: { schema: { type: string } } } }
         '404': { description: Unknown code, content: { text/html: { schema: { type: string } } } }
 
+  /c/{code}:
+    get:
+      operationId: publicExamPass
+      tags: [Public]
+      summary: Exam pass check (what an invigilator's scanner opens)
+      description: |
+        Re-checks clearance **now** against the current rule, every time, so a screenshot of an
+        old pass proves nothing: "✓ Cleared" or "✗ Not cleared", with the student's full name, ID,
+        programme and the time checked. No phone, no amounts. `noindex`, `Cache-Control no-store`;
+        rate-limited per IP like the dot API.
+      security: []
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, example: 7KQ2MX9P }, description: The pass code }
+      responses:
+        '200': { description: The live check (cleared or not), content: { text/html: { schema: { type: string } } } }
+        '404': { description: Unknown code, content: { text/html: { schema: { type: string } } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   # ── Channel API ─────────────────────────────────────────────────────────────
   /v1/channel/payers/{kind}/{ref}:
     get:
@@ -423,6 +441,26 @@ paths:
         - $ref: '#/components/parameters/UserAlias'
       responses:
         '200': { description: Receipt, content: { application/json: { schema: { $ref: '#/components/schemas/DotReceipt' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/dot/payers/{kind}/{ref}/clearance:
+    get:
+      operationId: dotGetClearance
+      tags: [Dash dot]
+      summary: Exam clearance
+      description: |
+        Students only (applicants: 404). `X-User-Alias` must match. Evaluated live from the ledger
+        and the finance office's rule (`GET /v1/admin/clearance-policy`): NOT_CLEARED lists the
+        `blocking` fees and what's `outstanding` (money held by an open payment isn't paid yet).
+        CLEARED carries a pass: `passCode` and `verifyUrl` (`/c/{passCode}`, which re-checks live).
+        The pass code stays the same for the student and period.
+      security: []
+      parameters: [{ $ref: '#/components/parameters/PayerKind' }, { $ref: '#/components/parameters/PayerRef' }, { $ref: '#/components/parameters/UserAlias' }]
+      responses:
+        '200': { description: Clearance, content: { application/json: { schema: { $ref: '#/components/schemas/Clearance' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/AliasForbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -993,6 +1031,48 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/admin/clearance-policy:
+    get:
+      operationId: adminGetClearancePolicy
+      tags: [Admin · Fee setup]
+      summary: The exam-clearance rule
+      description: '`placeholder: true` until the finance office sets the real rule.'
+      x-permission: fees.read
+      security: [{ adminJwt: [] }]
+      responses:
+        '200': { description: Rule, content: { application/json: { schema: { $ref: '#/components/schemas/ClearancePolicy' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: adminPutClearancePolicy
+      tags: [Admin · Fee setup]
+      summary: Set the exam-clearance rule
+      description: |
+        A student is cleared when every obligation of `feeTypeCodes` in `period`, and (if
+        `includeOverdue`) every obligation past its fee's due date, has a zero balance. Unknown fee
+        type codes, or a rule that blocks nothing, are rejected (400). Clears `placeholder`. Audited
+        (`clearance_policy.update`). Passes already issued re-check against the new rule.
+      x-permission: clearance.manage
+      security: [{ adminJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [examName, period, feeTypeCodes, includeOverdue]
+              properties:
+                examName: { type: string, minLength: 1, maxLength: 80, example: First semester exams }
+                period: { type: string, minLength: 1, maxLength: 20, example: 2026/27 }
+                feeTypeCodes: { type: array, maxItems: 20, items: { type: string }, example: [TUITION] }
+                includeOverdue: { type: boolean }
+      responses:
+        '200': { description: The new rule, content: { application/json: { schema: { $ref: '#/components/schemas/ClearancePolicy' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /v1/admin/audit-log:
     get:
@@ -2304,6 +2384,42 @@ components:
         issuedAt: { type: string, format: date-time }
         verifyUrl: { type: string, format: uri }
         pdfUrl: { type: 'null', description: 'Not made yet.' }
+    Clearance:
+      type: object
+      required: [status, exam, outstanding, blocking, passCode, verifyUrl, issuedAt]
+      properties:
+        status: { type: string, enum: [CLEARED, NOT_CLEARED] }
+        exam:
+          type: object
+          required: [name, period]
+          properties:
+            name: { type: string }
+            period: { type: string }
+        outstanding: { $ref: '#/components/schemas/Money' }
+        blocking:
+          type: array
+          items:
+            type: object
+            required: [obligationId, feeName, balance]
+            properties:
+              obligationId: { type: string, format: uuid }
+              feeName: { type: string }
+              balance: { $ref: '#/components/schemas/Money' }
+        passCode: { type: [string, 'null'], example: 7KQ2MX9P }
+        verifyUrl: { type: [string, 'null'], format: uri }
+        issuedAt: { type: [string, 'null'], format: date-time }
+    ClearancePolicy:
+      type: object
+      required: [id, examName, period, feeTypeCodes, includeOverdue, placeholder, updatedBy, updatedAt]
+      properties:
+        id: { const: current }
+        examName: { type: string }
+        period: { type: string }
+        feeTypeCodes: { type: array, items: { type: string } }
+        includeOverdue: { type: boolean }
+        placeholder: { type: boolean, description: 'true until the finance office sets the real rule' }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
     PayRequest:
       type: object
       required: [code, shareUrl, obligationId, feeName, amount, paid, status, message, requester, recipientName, contributions, openedAt, createdAt, expiresAt]
@@ -2714,7 +2830,7 @@ components:
               receivedAt: { type: string, format: date-time }
     Permission:
       type: string
-      enum: [fees.read, fees.manage, instalments.manage, payers.read, payers.adjust, payments.read, payments.export, payments.refund, payments.reconcile, receipts.resend, accounts.read, accounts.manage, payouts.read, payouts.manage, transfers.read, transfers.retry, reconciliation.read, reconciliation.manage, outbox.read, outbox.retry, reports.read, audit.read, users.manage, settings.manage, academics.manage, portal.read]
+      enum: [fees.read, fees.manage, instalments.manage, payers.read, payers.adjust, payments.read, payments.export, payments.refund, payments.reconcile, receipts.resend, accounts.read, accounts.manage, payouts.read, payouts.manage, transfers.read, transfers.retry, reconciliation.read, reconciliation.manage, outbox.read, outbox.retry, reports.read, audit.read, users.manage, settings.manage, academics.manage, portal.read, clearance.manage]
 
     CountAmount:
       type: object

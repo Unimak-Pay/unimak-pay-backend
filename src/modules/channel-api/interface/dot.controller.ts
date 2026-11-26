@@ -10,6 +10,7 @@ import { PAYMENT_REPOSITORY, type PaymentRepository } from '../../payments/appli
 import { PaymentStatusQuery } from '../../payments/application/payment-status.query';
 import { QuotePaymentUseCase } from '../../payments/application/quote-payment.use-case';
 import { shortName } from '../../../shared/domain/mask';
+import { ClearanceService } from '../../dot-extras/application/clearance.service';
 import { PaymentHistoryQuery } from '../../dot-extras/application/payment-history.query';
 import { PayRequestsService } from '../../dot-extras/application/pay-requests.service';
 import type { Payer } from '../../payers/domain/payer';
@@ -42,6 +43,7 @@ export class DotController {
     private readonly alias: DotAliasCheck,
     private readonly payRequests: PayRequestsService,
     private readonly history: PaymentHistoryQuery,
+    private readonly clearance: ClearanceService,
   ) {}
 
   /**
@@ -138,6 +140,15 @@ export class DotController {
     const r = await this.history.receipt(paymentRef.slice(0, 20));
     if (!r) throw new DomainError('NOT_FOUND', 'No receipt for this payment yet');
     return r;
+  }
+
+  // ── Exam clearance (docs/dot-extras.md §4) ──────────────────────────────────
+
+  /** Live against the finance office's rule; a CLEARED pass links to the public /c/{code} check. */
+  @Get('payers/:kind/:ref/clearance')
+  async getClearance(@Param('kind', PayerKindPipe) kind: PayerKind, @Param('ref', RefPipe) ref: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    if (kind !== 'STUDENT') throw new DomainError('NOT_FOUND', 'Exam clearance is for students');
+    return this.clearance.forPayer(await this.matchedPayer(kind, ref, req, res));
   }
 
   // ── Pay requests (docs/dot-extras.md §3) ───────────────────────────────────

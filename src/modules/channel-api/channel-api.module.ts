@@ -11,10 +11,11 @@ import { ChannelController } from './interface/channel.controller';
 import { DotRateLimitGuard } from './interface/dot-rate-limit.guard';
 import { DotController } from './interface/dot.controller';
 import { PublicReceiptController } from './interface/public-receipt.controller';
+import { PublicClearanceController } from './interface/public-clearance.controller';
 
 @Module({
   imports: [AcademicsModule, PayersModule, PaymentsModule, ReceiptsModule, DotExtrasModule],
-  controllers: [ChannelController, DotController, PublicReceiptController],
+  controllers: [ChannelController, DotController, PublicReceiptController, PublicClearanceController],
   providers: [ChannelClients, ChannelAuthGuard, DotRateLimitGuard, DotAliasCheck],
 })
 export class ChannelApiModule {}
