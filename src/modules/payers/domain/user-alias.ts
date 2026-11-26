@@ -1,3 +1,5 @@
+import { maskEmail } from '../../../shared/domain/mask';
+
 /**
  * The dot's X-User-Alias (docs/dot-extras.md): the Dash account's phone number, or its
  * email when it has no phone. A check, not proof: the dot sets it itself.
@@ -23,20 +25,16 @@ export function canonicalAlias(raw: string | null | undefined): CanonicalAlias |
   return d.length >= 6 && d.length <= 15 ? { kind: 'phone', value: d } : null;
 }
 
-/** The payer record only has a phone, so an email alias never matches. */
-export function aliasMatches(alias: CanonicalAlias, payerPhone: string | null | undefined): boolean {
-  if (alias.kind !== 'phone') return false;
-  const own = canonicalAlias(payerPhone);
-  return own?.kind === 'phone' && own.value === alias.value;
+/** A phone alias matches the payer's phone; an email alias their email (case-insensitive). */
+export function aliasMatches(alias: CanonicalAlias, payer: { phone: string | null | undefined; email?: string | null }): boolean {
+  const own = canonicalAlias(alias.kind === 'phone' ? payer.phone : payer.email);
+  return own?.kind === alias.kind && own.value === alias.value;
 }
 
 /** For logs: "*****456" or "a***@example.com". Never log an alias in full. */
 export function maskAlias(raw: string): string {
   const a = canonicalAlias(raw);
   if (!a) return '(unreadable)';
-  if (a.kind === 'email') {
-    const [user, domain] = a.value.split('@');
-    return `${(user ?? '').charAt(0)}***@${domain ?? ''}`;
-  }
+  if (a.kind === 'email') return maskEmail(a.value) ?? '(unreadable)';
   return `${'*'.repeat(a.value.length - 3)}${a.value.slice(-3)}`;
 }

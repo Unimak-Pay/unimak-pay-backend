@@ -226,3 +226,22 @@ describe('GET /v1/admin/payers/:id', () => {
     await bursar.get('/v1/admin/payers/needs-review').expect(200);
   });
 });
+
+describe('email in admin views', () => {
+  const REF = 'UNI-2026-0406';
+  beforeAll(async () => {
+    const ev = student(REF);
+    await portal(http, 'post', '/v1/portal/events', { events: [{ ...ev, data: { ...ev.data, email: 'Analytics.406@Example.com' } }] }).expect(200);
+  });
+
+  it('full on the detail page, masked in the list and CSV', async () => {
+    const list = await bursar.get(`/v1/admin/payers?q=${REF}`).expect(200);
+    expect(list.body.items[0]).toMatchObject({ ref: REF, maskedEmail: 'a***@example.com' });
+    expect(JSON.stringify(list.body)).not.toContain('Analytics.406@');
+    const csv = (await bursar.get(`/v1/admin/payers/export.csv?q=${REF}`).expect(200)).text;
+    expect(csv).toContain(',a***@example.com,');
+    expect(csv).not.toContain('Analytics.406@');
+    const detail = await bursar.get(`/v1/admin/payers/${list.body.items[0].id}`).expect(200);
+    expect(detail.body.payer.email).toBe('Analytics.406@Example.com');
+  });
+});

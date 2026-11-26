@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DomainError } from '../../../shared/domain/errors';
-import { maskPhone } from '../../../shared/domain/mask';
+import { maskEmail, maskPhone } from '../../../shared/domain/mask';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
 import { minInstalment, pickInstalmentRule } from '../../catalog/domain/instalments';
 import { collectionRate, standing, sumTotals, type CellTotals, type StandingFilter } from '../../payers/domain/standing';
@@ -32,7 +32,7 @@ export type PayerSort = (typeof PAYER_SORTS)[number];
 export interface PayerListQuery extends PayerFilters { standing?: StandingFilter; sort?: PayerSort; limit: number; cursor?: string }
 
 interface PayerRow {
-  id: string; kind: 'STUDENT' | 'APPLICANT'; ref: string; fullName: string; phone: string; programCode: string;
+  id: string; kind: 'STUDENT' | 'APPLICANT'; ref: string; fullName: string; phone: string; email: string | null; programCode: string;
   department: string | null; departmentName: string | null; facultyCode: string | null; level: number | null;
   enrolmentStatus: string | null; applicantStatus: string | null;
   obligations: number; billed: bigint; collected: bigint; outstanding: bigint; overdueAmount: bigint; lastPaymentAt: Date | null;
@@ -101,7 +101,7 @@ export class AdminAnalyticsService {
         WHERE ${this.feeWhere(f)}
         GROUP BY o.id, f."dueDate"
       ), pp AS (
-        SELECT py.id, py.kind::text AS kind, py.ref, py."fullName", py.phone, py."programCode", py.department, py.level,
+        SELECT py.id, py.kind::text AS kind, py.ref, py."fullName", py.phone, py.email, py."programCode", py.department, py.level,
                py."enrolmentStatus"::text AS "enrolmentStatus", py."applicantStatus",
                COUNT(ob.id)::int AS obligations,
                COALESCE(SUM(ob.billed), 0)::bigint AS billed,
@@ -302,7 +302,7 @@ export class AdminAnalyticsService {
 
     return {
       payer: {
-        id: p.id, kind: p.kind, ref: p.ref, fullName: p.fullName, phone: p.phone, programCode: p.programCode,
+        id: p.id, kind: p.kind, ref: p.ref, fullName: p.fullName, phone: p.phone, email: p.email, programCode: p.programCode,
         department: p.department, departmentName: dept?.name ?? null, facultyCode: dept?.faculty?.code ?? null, facultyName: dept?.faculty?.name ?? null,
         level: p.level, finalYear: p.finalYear, residency: p.residency, intake: p.intake,
         applicantStatus: p.applicantStatus, enrolmentStatus: p.enrolmentStatus, applicationRef: p.applicationRef,
@@ -321,7 +321,7 @@ export class AdminAnalyticsService {
 
 function presentRow(r: PayerRow) {
   return {
-    id: r.id, kind: r.kind, ref: r.ref, fullName: r.fullName, maskedPhone: maskPhone(r.phone), programCode: r.programCode,
+    id: r.id, kind: r.kind, ref: r.ref, fullName: r.fullName, maskedPhone: maskPhone(r.phone), maskedEmail: maskEmail(r.email), programCode: r.programCode,
     department: r.department, departmentName: r.departmentName, facultyCode: r.facultyCode, level: r.level,
     enrolmentStatus: r.enrolmentStatus, applicantStatus: r.applicantStatus,
     obligations: r.obligations, billed: r.billed, collected: r.collected, balance: r.outstanding,
@@ -351,7 +351,7 @@ export function decodeCursor(s: string): Cursor {
 }
 
 export const PAYER_CSV_COLUMNS = [
-  'kind', 'ref', 'full_name', 'phone_masked', 'program', 'department', 'department_name', 'faculty', 'level',
+  'kind', 'ref', 'full_name', 'phone_masked', 'email_masked', 'program', 'department', 'department_name', 'faculty', 'level',
   'enrolment_status', 'applicant_status', 'obligations', 'billed_sle', 'collected_sle', 'balance_sle', 'standing',
   'overdue', 'overdue_sle', 'last_payment_at', 'payer_id',
 ] as const;
@@ -359,7 +359,7 @@ export const PAYER_CSV_COLUMNS = [
 function payerCsvRow(r: PayerRow): string {
   const p = presentRow(r);
   return [
-    p.kind, p.ref, p.fullName, p.maskedPhone, p.programCode, p.department, p.departmentName, p.facultyCode, p.level,
+    p.kind, p.ref, p.fullName, p.maskedPhone, p.maskedEmail, p.programCode, p.department, p.departmentName, p.facultyCode, p.level,
     p.enrolmentStatus, p.applicantStatus, p.obligations, sle(p.billed), sle(p.collected), sle(p.balance), p.standing,
     p.overdue ? 'yes' : 'no', sle(p.overdueAmount), p.lastPaymentAt?.toISOString() ?? null, p.id,
   ].map(cell).join(',');

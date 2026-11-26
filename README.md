@@ -361,7 +361,7 @@ a Vercel Firewall rate-limit rule on `/v1/dot/` for a global one.
 
 | Method | Path | |
 |---|---|---|
-| GET | `/payers/:kind/:ref` | alias matches (or no header): full name, programme, department/faculty names, level, intake, residency, applicant status, masked phone + obligations. Another number: `{kind, ref, shortName, limited: true, stale}` + obligations |
+| GET | `/payers/:kind/:ref` | alias matches (or no header): full name, programme, department/faculty names, level, intake, residency, applicant status, masked phone and email + obligations. Another number: `{kind, ref, shortName, limited: true, stale}` + obligations |
 | POST | `/quotes` | `{obligationId, amount}`, channel DOTS |
 | POST | `/payments` | `{obligationId, amount, payRequestCode?, paidByName?, payingForSelf?}` + `Idempotency-Key` header → `{paymentId, paymentRef, status, amount, expiresAt, order, financialAccountId}` |
 | GET | `/payments/status/:ref` | by `paymentRef` or Monime's order number (payer masked) |
@@ -380,8 +380,9 @@ payment id, so Monime's `payment.processing_completed` settles it like any other
 to the same Space as `MONIME_API_KEY`.
 
 **Dot extras** (`docs/dot-extras.md`). From dot 0.2.3 every request carries `X-User-Alias`,
-the Dash account's phone (or email). It's compared with the payer's phone on its national
-number, and it's a check, not a login: the dot sets it itself. Failed matches are limited
+the Dash account's phone (or email). A phone is compared with the payer's phone on its national
+number, an email with the payer's email (optional, from the portal) ignoring case. It's a check,
+not a login: the dot sets it itself. Failed matches are limited
 per IP and per ID (`DOT_ALIAS_FAILURES_PER_HOUR`, default 10), the alias is never returned
 and only logged masked. A missing header keeps the old behaviour until
 `DOT_ALIAS_REQUIRED=true`. History, a request's contributions and clearance only ever count

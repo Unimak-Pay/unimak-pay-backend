@@ -47,7 +47,7 @@ describe('public dot API: lookup → payment order → Monime webhook', () => {
   it('needs no credentials; full name and academic details, phone masked', async () => {
     const res = await get(`/v1/dot/payers/student/${REF}`).expect(200);
     expect(res.body.payer).toEqual({
-      kind: 'student', ref: REF, fullName: 'Dot Student', maskedPhone: '+232*****093',
+      kind: 'student', ref: REF, fullName: 'Dot Student', maskedPhone: '+232*****093', maskedEmail: null,
       programCode: 'BSC-CS', programLine: 'BSC-CS · Level 1',
       department: 'COMPUTER-SCI', departmentName: expect.any(String), facultyCode: expect.any(String), facultyName: expect.any(String),
       level: 1, finalYear: false, residency: 'LOCAL', intake: '2026-SEP', applicantStatus: null, stale: false,

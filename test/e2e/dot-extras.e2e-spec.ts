@@ -356,3 +356,27 @@ describe('exam clearance', () => {
     await dot(ip(), aliasOf(ME)).get('/v1/dot/payers/applicant/APP-2026-0003/clearance').expect(404);
   });
 });
+
+describe('email on the record', () => {
+  const EMAIL_REF = 'UNI-2026-0503';
+  beforeAll(async () => {
+    const ev = student(EMAIL_REF);
+    await portal(http, 'post', '/v1/portal/events', { events: [{ ...ev, data: { ...ev.data, email: 'Abdul.Dxt503@Example.com' } }] }).expect(200);
+  });
+
+  it('an email alias matches it, ignoring case', async () => {
+    const res = await dot(ip(), ' abdul.dxt503@example.COM ').get(`/v1/dot/payers/student/${EMAIL_REF}`).expect(200);
+    expect(res.body.payer).toMatchObject({ fullName: 'Abdul Dxt503 Koroma', maskedEmail: 'a***@example.com', maskedPhone: '+232*****503' });
+    await dot(ip(), 'abdul.dxt503@example.com').get(`/v1/dot/payers/student/${EMAIL_REF}/payments`).expect(200);
+    expect((await dot(ip(), 'someone@example.com').get(`/v1/dot/payers/student/${EMAIL_REF}/payments`).expect(403)).body.error.code).toBe('ALIAS_MISMATCH');
+  });
+
+  it('never shows it to a sponsor, and only masked where agreed', async () => {
+    const short = await dot(ip(), '+232 77 999999').get(`/v1/dot/payers/student/${EMAIL_REF}`).expect(200);
+    expect(JSON.stringify(short.body)).not.toMatch(/example\.com|a\*\*\*@/i);
+    const full = await dot(ip(), aliasOf(EMAIL_REF)).get(`/v1/dot/payers/student/${EMAIL_REF}`).expect(200);
+    expect(JSON.stringify(full.body)).not.toMatch(/Abdul\.Dxt503@/i);
+    // a payer without an email
+    expect((await dot(ip(), aliasOf(ME)).get(`/v1/dot/payers/student/${ME}`).expect(200)).body.payer.maskedEmail).toBeNull();
+  });
+});

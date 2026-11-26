@@ -14,6 +14,14 @@ export function maskPhone(phone: string): string {
   return phone.slice(0, 4) + '*'.repeat(phone.length - 7) + phone.slice(-3);
 }
 
+/** "Aminata.Kamara@Gmail.com" → "a***@gmail.com" (first letter, full domain); null when not an email. */
+export function maskEmail(email: string | null | undefined): string | null {
+  const e = (email ?? '').trim().toLowerCase();
+  const at = e.lastIndexOf('@');
+  if (at < 1 || at === e.length - 1) return null;
+  return `${e.charAt(0)}***${e.slice(at)}`;
+}
+
 /** "Aminata Kamara" → "Aminata K.", "Mohamed Lamin Bangura" → "Mohamed B.", "Aminata" → "Aminata" (USSD screens) */
 export function shortName(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);

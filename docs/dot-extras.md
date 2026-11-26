@@ -174,8 +174,8 @@ once Monime completes it. The order's metadata gains `payRequestCode`, for Monim
 
 ## Decisions (owner, 2026-11-26)
 
-1. **X-User-Alias** (contract section 0): phones compared on the national number, emails case-insensitively (an email
-   never matches: we only hold phones). A match is required for the full lookup, history, a payer's pay-request list,
+1. **X-User-Alias** (contract section 0): phones compared on the national number, emails case-insensitively against the
+   payer's email (from the portal since 2026-11-27; until it sends one, an email alias can't match). A match is required for the full lookup, history, a payer's pay-request list,
    creating a request and clearance; mismatch → 403 `ALIAS_MISMATCH` with a student-facing message. Missing header:
    the lookup keeps today's behaviour unless `DOT_ALIAS_REQUIRED=true`; the new private routes answer 403
    `ALIAS_REQUIRED` (published dots don't call them). Without a match the lookup returns

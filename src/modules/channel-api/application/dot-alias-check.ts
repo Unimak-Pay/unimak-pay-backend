@@ -17,7 +17,7 @@ export interface AliasRequest {
   res: Response;
 }
 
-interface PayerLike { kind: string; ref: string; phone: string | null }
+interface PayerLike { kind: string; ref: string; phone: string | null; email?: string | null }
 
 /**
  * X-User-Alias check for the dot (docs/dot-extras.md). It is a check, not a login:
@@ -67,7 +67,7 @@ export class DotAliasCheck {
 
   private matches(r: AliasRequest, payer: PayerLike): boolean {
     const a = canonicalAlias(r.alias);
-    if (a && aliasMatches(a, payer.phone)) return true;
+    if (a && aliasMatches(a, payer)) return true;
     this.byIp.hit(r.ip);
     this.byPayer.hit(payerKey(payer));
     this.logger.log(`X-User-Alias mismatch for ${payer.kind} ${payer.ref} (alias ${maskAlias(r.alias ?? '')})`);

@@ -1,4 +1,4 @@
-import { maskName, maskPhone } from '../../../shared/domain/mask';
+import { maskEmail, maskName, maskPhone } from '../../../shared/domain/mask';
 import type { DepartmentNames } from '../../academics/application/academics.service';
 import { formatSle } from '../../../shared/domain/money';
 import type { ObligationView } from '../../payers/application/payer-obligations.query';
@@ -29,6 +29,7 @@ export function presentDotPayer(p: Payer, stale: boolean, names: DepartmentNames
     ref: p.ref,
     fullName: p.fullName,
     maskedPhone: p.phone ? maskPhone(p.phone) : null,
+    maskedEmail: maskEmail(p.email),
     programCode: p.programCode,
     programLine: programLine(p),
     department: p.department,

@@ -988,7 +988,7 @@ paths:
         rows (400 `VALIDATION` beyond that). Cells starting with `= + - @` are prefixed with `'`.
         UTF-8 with BOM. Every export is audited (`payers.export`). Needs `payers.read` and `payments.export`.
 
-        Columns: kind, ref, full_name, phone_masked, program, department, department_name, faculty, level,
+        Columns: kind, ref, full_name, phone_masked, email_masked, program, department, department_name, faculty, level,
         enrolment_status, applicant_status, obligations, billed_sle, collected_sle, balance_sle, standing,
         overdue, overdue_sle, last_payment_at, payer_id.
       x-permission: payments.export
@@ -2226,7 +2226,8 @@ components:
       description: |
         Dot 0.2.3+: the Dash account's phone number (or email when it has none), from Dash sign-in,
         e.g. `+232 76 123456`. Phones are compared on their national number (`076123456`,
-        `23276123456` and `+232 76 123456` are the same); emails never match (we only hold phones).
+        `23276123456` and `+232 76 123456` are the same); an email is compared with the email the
+        portal gave us, ignoring case.
         A check, not a login: the dot sets it itself. Failed matches are limited per IP and per ID;
         it is never returned and only logged masked.
       schema: { type: string, maxLength: 254 }
@@ -2297,12 +2298,13 @@ components:
     PaymentRef: { type: string, pattern: '^[1-9]\d{7}$', example: '15540719', description: '8-digit ref to give the payer for status checks.' }
     DotPayer:
       type: object
-      required: [kind, ref, fullName, maskedPhone, programCode, programLine, department, departmentName, facultyCode, facultyName, level, finalYear, residency, intake, applicantStatus, stale]
+      required: [kind, ref, fullName, maskedPhone, maskedEmail, programCode, programLine, department, departmentName, facultyCode, facultyName, level, finalYear, residency, intake, applicantStatus, stale]
       properties:
         kind: { type: string, enum: [applicant, student] }
         ref: { type: string, example: UNI-2026-0001 }
         fullName: { type: string, example: Abdul Koroma }
         maskedPhone: { type: [string, 'null'], example: '+232*****001' }
+        maskedEmail: { type: [string, 'null'], example: 'a***@gmail.com', description: 'null when the portal has no email' }
         programCode: { type: string, example: BSC-CS }
         programLine: { type: string, example: 'BSC-CS · Level 1' }
         department: { type: [string, 'null'], example: COMPUTER-SCI }
@@ -2686,13 +2688,14 @@ components:
             lastPortalEventAt: { type: [string, 'null'], format: date-time }
     PayerListItem:
       type: object
-      required: [id, kind, ref, fullName, maskedPhone, programCode, department, departmentName, facultyCode, level, enrolmentStatus, applicantStatus, obligations, billed, collected, balance, standing, overdue, overdueAmount, lastPaymentAt]
+      required: [id, kind, ref, fullName, maskedPhone, maskedEmail, programCode, department, departmentName, facultyCode, level, enrolmentStatus, applicantStatus, obligations, billed, collected, balance, standing, overdue, overdueAmount, lastPaymentAt]
       properties:
         id: { type: string, format: uuid }
         kind: { type: string, enum: [STUDENT, APPLICANT] }
         ref: { type: string }
         fullName: { type: string }
         maskedPhone: { type: string, example: '+232*****456' }
+        maskedEmail: { type: [string, 'null'], example: 'a***@gmail.com' }
         programCode: { type: string }
         department: { type: [string, 'null'] }
         departmentName: { type: [string, 'null'] }
@@ -2714,13 +2717,14 @@ components:
       properties:
         payer:
           type: object
-          required: [id, kind, ref, fullName, phone, programCode, department, departmentName, facultyCode, facultyName, level, finalYear, residency, intake, applicantStatus, enrolmentStatus, applicationRef, portalUpdatedAt, snapshotAt]
+          required: [id, kind, ref, fullName, phone, email, programCode, department, departmentName, facultyCode, facultyName, level, finalYear, residency, intake, applicantStatus, enrolmentStatus, applicationRef, portalUpdatedAt, snapshotAt]
           properties:
             id: { type: string, format: uuid }
             kind: { type: string, enum: [STUDENT, APPLICANT] }
             ref: { type: string }
             fullName: { type: string }
             phone: { type: string, description: Full number }
+            email: { type: [string, 'null'], description: 'Full email, when the portal has one' }
             programCode: { type: string }
             department: { type: [string, 'null'] }
             departmentName: { type: [string, 'null'] }
