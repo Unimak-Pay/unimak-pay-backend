@@ -451,8 +451,8 @@ paths:
         - Unknown or deleted: 404.
         - The amount is checked against the fee's payable now, as quotes do: 422 `AMOUNT_EXCEEDS_PAYABLE` if
           another payment has taken the fee below it.
-        Before calling `dash.payments.request()` again, call `dash.payments.get(reference)`: if Dash already has
-        a payment for this order, wait for it instead of opening a second sheet.
+        Calling `dash.payments.request()` again with this order is safe: Monime only records a payment once the
+        person confirms it, so one order can't be paid twice (if it ever were, reconciliation settles it).
       security: []
       parameters:
         - { name: paymentRef, in: path, required: true, schema: { $ref: '#/components/schemas/PaymentRef' } }
