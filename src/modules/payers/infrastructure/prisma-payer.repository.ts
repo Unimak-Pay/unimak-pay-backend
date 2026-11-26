@@ -20,6 +20,7 @@ export class PrismaPayerRepository implements PayerRepository {
   }
 
   async upsertSnapshot(s: PayerSnapshot, at: Date, db: Db = this.prisma, portalUpdatedAt?: Date): Promise<Payer> {
+    // email: undefined keeps what we hold (Prisma skips it); null clears it (events only)
     const data = { ...s, snapshotAt: at, ...(portalUpdatedAt ? { portalUpdatedAt } : {}) };
     const update = portalUpdatedAt
       ? data
@@ -27,10 +28,11 @@ export class PrismaPayerRepository implements PayerRepository {
           ...data,
           ...(s.enrolmentStatus === null ? { enrolmentStatus: undefined } : {}),
           ...(s.applicationRef === null ? { applicationRef: undefined } : {}),
+          ...(s.email === null ? { email: undefined } : {}),
         };
     const r = await db.payer.upsert({
       where: { kind_ref: { kind: s.kind, ref: s.ref } },
-      create: data,
+      create: { ...data, email: s.email ?? null },
       update,
     });
     return toPayer(r);

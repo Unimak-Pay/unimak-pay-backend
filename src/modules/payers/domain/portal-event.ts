@@ -9,6 +9,8 @@ export const APPLICANT_STATUSES = ['APPLIED', 'ADMITTED', 'REJECTED', 'WITHDRAWN
 
 const REF = /^[A-Za-z0-9_-]{1,64}$/;
 const PHONE = /^\+\d{8,15}$/;
+/** Deliberately loose: one @, no spaces, a dot in the domain. */
+export const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Same rule as department codes (ACADEMIC_CODE); unknown codes are accepted and flagged for review. */
 const CODE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
 const PROGRAM = /^[A-Za-z0-9][A-Za-z0-9_.\/-]{0,39}$/;
@@ -55,6 +57,13 @@ export function parsePortalEvent(e: Obj): ParseResult {
   const fullName = typeof data['fullName'] === 'string' ? data['fullName'].trim() : '';
   if (!fullName || fullName.length > 200) errors.push('fullName must be 1-200 characters');
   const phone = str('phone', PHONE, 'must be in international format, e.g. +23276123456');
+  // optional: absent = keep what we hold; null = none
+  const rawEmail = data['email'];
+  let email: string | null | undefined;
+  if (rawEmail === undefined) email = undefined;
+  else if (rawEmail === null) email = null;
+  else if (typeof rawEmail === 'string' && rawEmail.trim().length <= 254 && EMAIL.test(rawEmail.trim())) email = rawEmail.trim();
+  else errors.push('email must be null or an email address (at most 254 characters)');
   const programCode = str('programCode', PROGRAM, 'must be 1-40 letters, digits or _ . / -');
   const department = str('department', CODE, 'must be 1-40 letters, digits or _ . - (starting with a letter or digit)');
   const intake = str('intake', INTAKE, 'must be 1-20 letters, digits or _ . / -');
@@ -69,7 +78,7 @@ export function parsePortalEvent(e: Obj): ParseResult {
     const status = data['status'];
     if (!APPLICANT_STATUSES.includes(status as (typeof APPLICANT_STATUSES)[number])) errors.push(`status must be one of ${APPLICANT_STATUSES.join(', ')}`);
     snapshot = {
-      kind: 'APPLICANT', ref: applicationRef, fullName, phone, programCode, department, level: null, finalYear: null,
+      kind: 'APPLICANT', ref: applicationRef, fullName, phone, email, programCode, department, level: null, finalYear: null,
       residency: residency as PayerSnapshot['residency'], intake, applicantStatus: status as string, enrolmentStatus: null, applicationRef: null,
     };
   } else {
@@ -83,7 +92,7 @@ export function parsePortalEvent(e: Obj): ParseResult {
     const appRef = data['applicationRef'];
     if (appRef !== undefined && appRef !== null && (typeof appRef !== 'string' || !REF.test(appRef))) errors.push('applicationRef must be null or 1-64 letters, digits, _ or -');
     snapshot = {
-      kind: 'STUDENT', ref: studentId, fullName, phone, programCode, department, level: level as number, finalYear: finalYear as boolean,
+      kind: 'STUDENT', ref: studentId, fullName, phone, email, programCode, department, level: level as number, finalYear: finalYear as boolean,
       residency: residency as PayerSnapshot['residency'], intake, applicantStatus: null,
       enrolmentStatus: enrolmentStatus as EnrolmentStatus, applicationRef: (appRef as string | null | undefined) ?? null,
     };

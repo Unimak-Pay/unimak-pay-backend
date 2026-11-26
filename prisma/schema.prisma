@@ -192,6 +192,8 @@ model Payer {
   ref             String
   fullName        String
   phone           String
+  /// from the portal when it has one; compared case-insensitively (X-User-Alias)
+  email           String?
   programCode     String
   department      String?
   level           Int?

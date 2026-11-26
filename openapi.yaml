@@ -2551,6 +2551,7 @@ components:
         applicationRef: { type: string, example: APP-2026-0001 }
         fullName: { type: string }
         phone: { type: string, pattern: '^\+\d{8,15}$', example: '+23276100001' }
+        email: { type: [string, 'null'], maxLength: 254, format: email, description: 'Optional. Absent: we keep the email we hold. null: none (clears it).' }
         programCode: { type: string, example: BSC-CS }
         department: { type: string, example: COMPUTER-SCI }
         intake: { type: string, example: 2026-SEP }
@@ -2565,6 +2566,7 @@ components:
         applicationRef: { type: [string, 'null'], description: 'The application this student came from.' }
         fullName: { type: string }
         phone: { type: string, pattern: '^\+\d{8,15}$' }
+        email: { type: [string, 'null'], maxLength: 254, format: email, description: 'Optional. Absent: we keep the email we hold. null: none (clears it).' }
         programCode: { type: string }
         department: { type: string }
         level: { type: integer, minimum: 1, maximum: 10 }

@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { createApp } from '../../src/bootstrap';
 import { PORTAL_CLIENT, type PortalClient } from '../../src/modules/integrations/portal/portal.port';
+import { PAYER_REPOSITORY, type PayerRepository } from '../../src/modules/payers/application/payer.repository';
 import { ProvisionAccountsUseCase } from '../../src/modules/treasury/application/provision-accounts.use-case';
 import { adminToken, channel, portal } from './helpers';
 import { TEST_CRON_SECRET, TEST_PORTAL_SECRET_OLD } from './test-env';
@@ -214,5 +215,35 @@ describe('summary, admin log, retention', () => {
     const res = await http.get('/cron/expire-payments').set('authorization', `Bearer ${TEST_CRON_SECRET}`).expect(200);
     expect(res.body.portalEventsDeleted).toBeGreaterThanOrEqual(1);
     expect(await prisma.portalEvent.findUnique({ where: { id: old.id } })).toBeNull();
+  });
+});
+
+describe('email on the record (optional)', () => {
+  const S = 'UNI-2026-0205';
+  const emailOf = async () => (await prisma.payer.findUniqueOrThrow({ where: { kind_ref: { kind: 'STUDENT', ref: S } } })).email;
+  const at = (min: number) => `2026-11-27T09:${String(min).padStart(2, '0')}:00.000Z`;
+
+  it('an event sets it; leaving it out keeps it; null clears it', async () => {
+    await send([sEvent(student(S, { email: ' Abdul.Koroma@Example.com ', updatedAt: at(1) }))]).expect(200);
+    expect(await emailOf()).toBe('Abdul.Koroma@Example.com');
+    await send([sEvent(student(S, { level: 2, updatedAt: at(2) }))]).expect(200);
+    expect(await emailOf()).toBe('Abdul.Koroma@Example.com');
+    await send([sEvent(student(S, { email: null, updatedAt: at(3) }))]).expect(200);
+    expect(await emailOf()).toBeNull();
+  });
+
+  it('a bad email rejects only that event', async () => {
+    const res = await send([sEvent(student(S, { email: 'not-an-email', updatedAt: at(4) }))]).expect(200);
+    expect(res.body.results[0]).toMatchObject({ result: 'REJECTED', error: { message: expect.stringContaining('email must be') } });
+  });
+
+  it('a portal lookup without an email never clears one', async () => {
+    await send([sEvent(student(S, { email: 'abdul@example.com', updatedAt: at(5) }))]).expect(200);
+    const repo = app.get<PayerRepository>(PAYER_REPOSITORY);
+    const p = (await repo.find('STUDENT', S))!;
+    await repo.upsertSnapshot({ ...p, email: undefined }, new Date());
+    expect(await emailOf()).toBe('abdul@example.com');
+    await repo.upsertSnapshot({ ...p, email: null }, new Date()); // a lookup's null means "not said"
+    expect(await emailOf()).toBe('abdul@example.com');
   });
 });

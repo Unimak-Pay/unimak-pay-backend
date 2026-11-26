@@ -6,6 +6,11 @@ export interface PayerSnapshot {
   ref: string;
   fullName: string;
   phone: string;
+  /**
+   * null = none / cleared. undefined (snapshots only) = not said: keep what we hold.
+   * Events clear it with an explicit null; a portal lookup without one never does.
+   */
+  email?: string | null;
   programCode: string;
   department: string | null;
   level: number | null;

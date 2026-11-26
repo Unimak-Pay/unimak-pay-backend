@@ -7,6 +7,8 @@ export interface PortalApplicant {
   applicationRef: string;
   fullName: string;
   phone: string;
+  /** when the portal has one */
+  email?: string | null;
   programCode: string;
   /** Department.code of the department applied to */
   department: string;
@@ -19,6 +21,8 @@ export interface PortalStudent {
   studentId: string;
   fullName: string;
   phone: string;
+  /** when the portal has one */
+  email?: string | null;
   programCode: string;
   department: string;
   level: number;

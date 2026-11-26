@@ -75,6 +75,7 @@ same message.
   "applicationRef": "APP-2026-0001",
   "fullName": "Aminata Kamara",
   "phone": "+23276100001",
+  "email": "aminata.kamara@example.com",
   "programCode": "BSC-CS",
   "department": "COMPUTER-SCI",
   "intake": "2026-SEP",
@@ -92,6 +93,7 @@ same message.
   "applicationRef": "APP-2026-0001",
   "fullName": "Abdul Koroma",
   "phone": "+23276200001",
+  "email": "abdul.koroma@example.com",
   "programCode": "BSC-CS",
   "department": "COMPUTER-SCI",
   "level": 1,
@@ -109,6 +111,7 @@ same message.
 | `applicationRef` (on a student) | The application this student came from, or `null`. It links the applicant's payments to the student. |
 | `fullName` | As on the portal record. |
 | `phone` | International format, `+232…`. |
+| `email` | **Optional** (added 2026-11-27). An email address, at most 254 characters. Leave the field out if you don't know it (we keep the one we hold); send `null` to say there is none (we clear it). |
 | `department` | The portal's department code. We accept codes we don't know yet and flag them for an admin to place in a faculty, so never hold an event back because of the department. |
 | `level` | 1–10. |
 | `residency` | `LOCAL` or `INTERNATIONAL`. |

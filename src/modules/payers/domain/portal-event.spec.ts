@@ -52,3 +52,23 @@ describe('parsePortalEvent', () => {
     expect(parsePortalEvent({ type: 'student.upserted', data: student })).toMatchObject({ ok: false, error: 'occurredAt must be an ISO 8601 date-time' });
   });
 });
+
+describe('portal event email (optional)', () => {
+  const snap = (data: object) => {
+    const r = parsePortalEvent(ev('student.upserted', { ...student, ...data }));
+    if (!r.ok) throw new Error(r.error);
+    return r.event.snapshot;
+  };
+
+  it('absent keeps what we hold; null clears; a value is trimmed', () => {
+    expect(snap({}).email).toBeUndefined();
+    expect(snap({ email: null }).email).toBeNull();
+    expect(snap({ email: '  Abdul.Koroma@Example.com ' }).email).toBe('Abdul.Koroma@Example.com');
+  });
+
+  it('rejects something that is not an email', () => {
+    for (const email of ['abdul', 'a@b', 'a b@c.d', 42, `${'x'.repeat(250)}@c.de`]) {
+      expect(parsePortalEvent(ev('applicant.upserted', { ...applicant, email }))).toMatchObject({ ok: false, error: 'email must be null or an email address (at most 254 characters)' });
+    }
+  });
+});
