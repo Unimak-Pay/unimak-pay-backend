@@ -388,6 +388,44 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /v1/dot/payers/{kind}/{ref}/payments:
+    get:
+      operationId: dotPaymentHistory
+      tags: [Dash dot]
+      summary: Payment history
+      description: |
+        Every payment towards the payer's fees from any channel, newest first: all COMPLETED ones,
+        those still open, and FAILED / EXPIRED ones from the last 30 days. `X-User-Alias` must match.
+        `academicYear` is the latest `YYYY/YY` period of the payer's obligations (else their latest
+        period; null with none); `totalPaid` = COMPLETED payments on obligations in that period.
+        Only Monime's confirmation makes a payment COMPLETED.
+      security: []
+      parameters: [{ $ref: '#/components/parameters/PayerKind' }, { $ref: '#/components/parameters/PayerRef' }, { $ref: '#/components/parameters/UserAlias' }]
+      responses:
+        '200': { description: History, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentHistory' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/AliasForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/dot/payments/{paymentRef}/receipt:
+    get:
+      operationId: dotGetReceipt
+      tags: [Dash dot]
+      summary: Receipt of a completed payment
+      description: |
+        By our 8-digit `paymentRef` (random), so the result page can open it right after paying.
+        404 until Monime completed the payment. `verifyUrl` is the public `/r/{verifyCode}` page
+        (show it as a QR code). `pdfUrl` is null for now.
+      security: []
+      parameters:
+        - { name: paymentRef, in: path, required: true, schema: { $ref: '#/components/schemas/PaymentRef' } }
+        - $ref: '#/components/parameters/UserAlias'
+      responses:
+        '200': { description: Receipt, content: { application/json: { schema: { $ref: '#/components/schemas/DotReceipt' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   /v1/dot/pay-requests:
     post:
       operationId: dotCreatePayRequest
@@ -2213,6 +2251,59 @@ components:
         payRequestCode: { type: string, maxLength: 20, description: 'Pay through this pay request (dot 0.2.3+).' }
         paidByName: { type: string, maxLength: 40, description: "Payer's first name, display only; anything after the first word is dropped." }
         payingForSelf: { type: boolean, description: 'true when the student saved on that phone is paying; display only. Default false.' }
+    PaidBy:
+      type: object
+      required: [name, self]
+      description: 'Who paid, as the dot said (display only): `paidByName` and `payingForSelf` from POST /v1/dot/payments. Never a phone.'
+      properties:
+        name: { type: [string, 'null'], example: Fatmata }
+        self: { type: boolean }
+    PaymentMethodLabel: { type: [string, 'null'], enum: [Mobile money, Card, Bank, Wallet, null], description: "From Monime's Payment channel.type (momo, card, bank, wallet); null if unknown." }
+    PaymentHistory:
+      type: object
+      required: [academicYear, totalPaid, payments]
+      properties:
+        academicYear: { type: [string, 'null'], example: 2026/27 }
+        totalPaid: { $ref: '#/components/schemas/Money' }
+        payments:
+          type: array
+          items:
+            type: object
+            required: [paymentRef, obligationId, feeName, period, amount, status, paidBy, method, receiptNumber, createdAt, completedAt]
+            properties:
+              paymentRef: { $ref: '#/components/schemas/PaymentRef' }
+              obligationId: { type: string, format: uuid }
+              feeName: { type: string }
+              period: { type: string }
+              amount: { $ref: '#/components/schemas/Money' }
+              status: { $ref: '#/components/schemas/PaymentStatus' }
+              paidBy: { $ref: '#/components/schemas/PaidBy' }
+              method: { $ref: '#/components/schemas/PaymentMethodLabel' }
+              receiptNumber: { type: [string, 'null'] }
+              createdAt: { type: string, format: date-time }
+              completedAt: { type: [string, 'null'], format: date-time }
+    DotReceipt:
+      type: object
+      required: [receiptNumber, paymentRef, amount, feeName, period, payer, paidBy, method, issuedAt, verifyUrl, pdfUrl]
+      properties:
+        receiptNumber: { type: string, example: UNIMAK-2026-000123 }
+        paymentRef: { $ref: '#/components/schemas/PaymentRef' }
+        amount: { $ref: '#/components/schemas/Money' }
+        feeName: { type: string }
+        period: { type: string }
+        payer:
+          type: object
+          required: [kind, ref, fullName, programLine]
+          properties:
+            kind: { type: string, enum: [applicant, student] }
+            ref: { type: string }
+            fullName: { type: string }
+            programLine: { type: string }
+        paidBy: { $ref: '#/components/schemas/PaidBy' }
+        method: { $ref: '#/components/schemas/PaymentMethodLabel' }
+        issuedAt: { type: string, format: date-time }
+        verifyUrl: { type: string, format: uri }
+        pdfUrl: { type: 'null', description: 'Not made yet.' }
     PayRequest:
       type: object
       required: [code, shareUrl, obligationId, feeName, amount, paid, status, message, requester, recipientName, contributions, openedAt, createdAt, expiresAt]

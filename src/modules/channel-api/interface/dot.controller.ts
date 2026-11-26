@@ -10,6 +10,7 @@ import { PAYMENT_REPOSITORY, type PaymentRepository } from '../../payments/appli
 import { PaymentStatusQuery } from '../../payments/application/payment-status.query';
 import { QuotePaymentUseCase } from '../../payments/application/quote-payment.use-case';
 import { shortName } from '../../../shared/domain/mask';
+import { PaymentHistoryQuery } from '../../dot-extras/application/payment-history.query';
 import { PayRequestsService } from '../../dot-extras/application/pay-requests.service';
 import type { Payer } from '../../payers/domain/payer';
 import { type AliasRequest, DotAliasCheck } from '../application/dot-alias-check';
@@ -40,6 +41,7 @@ export class DotController {
     @Inject(PAYMENT_REPOSITORY) private readonly payments: PaymentRepository,
     private readonly alias: DotAliasCheck,
     private readonly payRequests: PayRequestsService,
+    private readonly history: PaymentHistoryQuery,
   ) {}
 
   /**
@@ -120,6 +122,22 @@ export class DotController {
     const v = await this.paymentStatus.byPublicRef(ref.slice(0, 40));
     if (!v) throw new DomainError('NOT_FOUND', 'Payment not found');
     return presentPaymentStatus(v);
+  }
+
+  // ── History and receipts (docs/dot-extras.md §1-2) ──────────────────────────
+
+  /** Every payment towards the payer's fees, newest first. X-User-Alias must match. */
+  @Get('payers/:kind/:ref/payments')
+  async paymentHistory(@Param('kind', PayerKindPipe) kind: PayerKind, @Param('ref', RefPipe) ref: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    return this.history.forPayer(await this.matchedPayer(kind, ref, req, res));
+  }
+
+  /** By paymentRef (random, 8 digits); 404 until Monime completed the payment. */
+  @Get('payments/:paymentRef/receipt')
+  async receipt(@Param('paymentRef') paymentRef: string) {
+    const r = await this.history.receipt(paymentRef.slice(0, 20));
+    if (!r) throw new DomainError('NOT_FOUND', 'No receipt for this payment yet');
+    return r;
   }
 
   // ── Pay requests (docs/dot-extras.md §3) ───────────────────────────────────

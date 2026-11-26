@@ -212,3 +212,65 @@ describe('pay requests', () => {
     await dot(ip()).get(`/v1/dot/payers/student/${ME}/pay-requests`).expect(403);
   });
 });
+
+describe('payment history and receipts', () => {
+  const mine = () => dot(ip(), aliasOf(ME));
+  let obligationId: string;
+  let selfPay: { paymentId: string; paymentRef: string };
+
+  beforeAll(async () => {
+    obligationId = await obligationOf(ME);
+  });
+
+  it('a receipt exists only once Monime completed the payment', async () => {
+    const res = await mine().post('/v1/dot/payments', { obligationId, amount: '5000', paidByName: 'Abdul', payingForSelf: true }, 'pay-dxt-self-01').expect(201);
+    selfPay = res.body;
+    const pending = await dot(ip()).get(`/v1/dot/payments/${selfPay.paymentRef}/receipt`).expect(404);
+    expect(pending.body.error.code).toBe('NOT_FOUND');
+    await complete(selfPay.paymentId);
+
+    const receipt = await dot(ip()).get(`/v1/dot/payments/${selfPay.paymentRef}/receipt`).expect(200);
+    expect(receipt.body).toEqual({
+      receiptNumber: expect.stringMatching(/^UNIMAK-\d{4}-\d{6}$/), paymentRef: selfPay.paymentRef,
+      amount: { value: '5000', display: 'SLE 50.00' }, feeName: 'Dot extras 2026/27', period: '2026/27',
+      payer: { kind: 'student', ref: ME, fullName: 'Abdul Dxt501 Koroma', programLine: 'BSC-DXT · Level 1' },
+      paidBy: { name: 'Abdul', self: true }, method: 'Mobile money',
+      issuedAt: expect.any(String), verifyUrl: expect.stringMatching(/\/r\/[2-9A-HJKMNP-Z]{10}$/), pdfUrl: null,
+    });
+    const page = await http.get(new URL(receipt.body.verifyUrl).pathname).expect(200);
+    expect(page.text).toContain('Valid UNIMAK receipt');
+    await dot(ip()).get('/v1/dot/payments/00000000/receipt').expect(404);
+    await dot(ip()).get('/v1/dot/payments/not-a-ref/receipt').expect(404);
+  });
+
+  it('lists every payment for the payer, newest first, with who paid and how', async () => {
+    // a failed payment from 40 days ago is left out; one from 5 days ago is shown
+    const old = await mine().post('/v1/dot/payments', { obligationId, amount: '1000' }, 'pay-dxt-old-01').expect(201);
+    const recent = await mine().post('/v1/dot/payments', { obligationId, amount: '1000' }, 'pay-dxt-recent-01').expect(201);
+    const ago = (d: number) => new Date(Date.now() - d * 86_400_000);
+    await prisma.payment.update({ where: { id: old.body.paymentId }, data: { status: 'FAILED', createdAt: ago(40), expiresAt: ago(40) } });
+    await prisma.payment.update({ where: { id: recent.body.paymentId }, data: { status: 'FAILED', createdAt: ago(5), expiresAt: ago(5) } });
+
+    const res = await mine().get(`/v1/dot/payers/student/${ME}/payments`).expect(200);
+    expect(res.body.academicYear).toBe('2026/27');
+    expect(res.body.totalPaid).toEqual({ value: '25000', display: 'SLE 250.00' }); // 12,000 + 8,000 (sponsor) + 5,000 (self)
+    const refs = res.body.payments.map((p: { paymentRef: string }) => p.paymentRef);
+    expect(refs).not.toContain(old.body.paymentRef);
+    expect(res.body.payments.find((p: { paymentRef: string }) => p.paymentRef === recent.body.paymentRef).status).toBe('FAILED');
+    const self = res.body.payments.find((p: { paymentRef: string }) => p.paymentRef === selfPay.paymentRef);
+    expect(self).toMatchObject({ status: 'COMPLETED', paidBy: { name: 'Abdul', self: true }, method: 'Mobile money', receiptNumber: expect.stringMatching(/^UNIMAK-/), obligationId, period: '2026/27' });
+    const sponsor = res.body.payments.filter((p: { paidBy: { name: string | null } }) => p.paidBy.name === 'Fatmata');
+    expect(sponsor).toHaveLength(1);
+    expect(sponsor[0]).toMatchObject({ paidBy: { name: 'Fatmata', self: false }, amount: { value: '12000' } });
+    const pending = res.body.payments.find((p: { status: string }) => p.status === 'PENDING');
+    expect(pending).toMatchObject({ receiptNumber: null, completedAt: null, method: null });
+    const times = res.body.payments.map((p: { createdAt: string }) => p.createdAt);
+    expect([...times].sort().reverse()).toEqual(times);
+    expect(JSON.stringify(res.body)).not.toMatch(/76500501|\+232/);
+  });
+
+  it('needs the payer’s own number', async () => {
+    expect((await dot(ip(), '+232 77 999999').get(`/v1/dot/payers/student/${ME}/payments`).expect(403)).body.error.code).toBe('ALIAS_MISMATCH');
+    expect((await dot(ip()).get(`/v1/dot/payers/student/${ME}/payments`).expect(403)).body.error.code).toBe('ALIAS_REQUIRED');
+  });
+});
