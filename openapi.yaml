@@ -431,6 +431,31 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /v1/dot/payers/{kind}/{ref}/receipts:
+    get:
+      operationId: dotListReceipts
+      tags: [Dash dot]
+      summary: A payer's receipts
+      description: |
+        Every receipt of the payer, newest first, including payments a sponsor made. Each item has the
+        same shape as `GET /v1/dot/payments/{paymentRef}/receipt`. `X-User-Alias` must match.
+      security: []
+      parameters: [{ $ref: '#/components/parameters/PayerKind' }, { $ref: '#/components/parameters/PayerRef' }, { $ref: '#/components/parameters/UserAlias' }]
+      responses:
+        '200':
+          description: Receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receipts]
+                properties:
+                  receipts: { type: array, items: { $ref: '#/components/schemas/DotReceipt' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/AliasForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   /v1/dot/payments/{paymentRef}/receipt:
     get:
       operationId: dotGetReceipt

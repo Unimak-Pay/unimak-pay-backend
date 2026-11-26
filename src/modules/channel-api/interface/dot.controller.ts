@@ -134,6 +134,12 @@ export class DotController {
     return this.history.forPayer(await this.matchedPayer(kind, ref, req, res));
   }
 
+  /** Every receipt of the payer, newest first (sponsors' payments too). X-User-Alias must match. */
+  @Get('payers/:kind/:ref/receipts')
+  async receipts(@Param('kind', PayerKindPipe) kind: PayerKind, @Param('ref', RefPipe) ref: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    return this.history.receiptsFor(await this.matchedPayer(kind, ref, req, res));
+  }
+
   /** By paymentRef (random, 8 digits); 404 until Monime completed the payment. */
   @Get('payments/:paymentRef/receipt')
   async receipt(@Param('paymentRef') paymentRef: string) {

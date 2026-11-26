@@ -383,3 +383,22 @@ describe('email on the record', () => {
     expect((await dot(ip(), aliasOf(ME)).get(`/v1/dot/payers/student/${ME}`).expect(200)).body.payer.maskedEmail).toBeNull();
   });
 });
+
+describe('a payer’s receipts', () => {
+  it('lists every receipt, sponsors’ too, newest first, in the single-receipt shape', async () => {
+    const res = await dot(ip(), aliasOf(ME)).get(`/v1/dot/payers/student/${ME}/receipts`).expect(200);
+    const list = res.body.receipts as { receiptNumber: string; paymentRef: string; issuedAt: string; paidBy: { name: string | null } }[];
+    expect(list.length).toBeGreaterThanOrEqual(4); // 12,000 + 8,000 (sponsor), 5,000 + 5,000 (self)
+    expect(list.map((r) => r.paidBy.name)).toContain('Fatmata');
+    const issued = list.map((r) => r.issuedAt);
+    expect([...issued].sort().reverse()).toEqual(issued);
+    const single = await dot(ip()).get(`/v1/dot/payments/${list[0]!.paymentRef}/receipt`).expect(200);
+    expect(list[0]).toEqual(single.body);
+    expect(JSON.stringify(res.body)).not.toMatch(/76500501|\+232|@/);
+  });
+
+  it('needs the payer’s own number', async () => {
+    expect((await dot(ip()).get(`/v1/dot/payers/student/${ME}/receipts`).expect(403)).body.error.code).toBe('ALIAS_REQUIRED');
+    expect((await dot(ip(), '+232 77 999999').get(`/v1/dot/payers/student/${ME}/receipts`).expect(403)).body.error.code).toBe('ALIAS_MISMATCH');
+  });
+});

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { AppConfig } from '../../../config/app-config';
 import { formatSle } from '../../../shared/domain/money';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
@@ -8,6 +9,8 @@ import { PAYMENT_REF } from '../../payments/domain/payment-ref';
 import { academicYearOf, paymentMethodLabel, shownInHistory } from '../domain/history';
 
 const money = (v: bigint) => ({ value: v.toString(), display: formatSle(v) });
+const RECEIPT_INCLUDE = { obligation: { include: { fee: true, payer: true } }, receipt: true } satisfies Prisma.PaymentInclude;
+type ReceiptRow = Prisma.PaymentGetPayload<{ include: typeof RECEIPT_INCLUDE }> & { receipt: NonNullable<Prisma.PaymentGetPayload<{ include: typeof RECEIPT_INCLUDE }>['receipt']> };
 
 /** History and receipts read COMPLETED only as Monime confirmed it; nothing the dot sent decides it. */
 @Injectable()
@@ -52,11 +55,22 @@ export class PaymentHistoryQuery {
   /** By our 8-digit payment ref; null until the payment is COMPLETED with its receipt. */
   async receipt(paymentRef: string) {
     if (!PAYMENT_REF.test(paymentRef)) return null;
-    const p = await this.prisma.payment.findUnique({
-      where: { paymentRef },
-      include: { obligation: { include: { fee: true, payer: true } }, receipt: true },
+    const p = await this.prisma.payment.findUnique({ where: { paymentRef }, include: RECEIPT_INCLUDE });
+    return p && p.status === 'COMPLETED' && p.receipt ? this.presentReceipt(p as ReceiptRow) : null;
+  }
+
+  /** Every receipt of the payer (sponsors' payments too), newest first. */
+  async receiptsFor(payer: Payer) {
+    const rows = await this.prisma.payment.findMany({
+      where: { status: 'COMPLETED', receipt: { isNot: null }, obligation: { payerId: payer.id } },
+      include: RECEIPT_INCLUDE,
+      orderBy: [{ receipt: { issuedAt: 'desc' } }, { id: 'asc' }],
     });
-    if (!p || p.status !== 'COMPLETED' || !p.receipt) return null;
+    return { receipts: rows.map((p) => this.presentReceipt(p as ReceiptRow)) };
+  }
+
+  /** The dot's Receipt shape (lib/types.ts). No phone or email. */
+  private presentReceipt(p: ReceiptRow) {
     const payer = p.obligation.payer;
     return {
       receiptNumber: p.receipt.number,
