@@ -64,9 +64,9 @@ export function presentObligation(v: ObligationView) {
   };
 }
 
-/** Expired-by-time payments read as EXPIRED even before the sweep runs. */
-export function presentPayment(p: PaymentRecord, now = new Date()) {
-  const status = (p.status === 'INITIATED' || p.status === 'PENDING') && p.expiresAt <= now ? 'EXPIRED' : p.status;
+/** Payments don't expire: PENDING until paid or deleted (docs/payment-lifecycle.md). */
+export function presentPayment(p: PaymentRecord) {
+  const status = p.status;
   return {
     paymentId: p.id,
     /** 8-digit ref to give the payer for status checks */
@@ -77,9 +77,10 @@ export function presentPayment(p: PaymentRecord, now = new Date()) {
     status,
     amount: money(p.amount),
     channel: p.channel,
+    /** when it is deleted if still unpaid (it never expires) */
     expiresAt: p.expiresAt.toISOString(),
     /** what the payer dials to approve (Monime payment code) */
-    ussdCode: status === 'PENDING' ? p.ussdCode : null,
+    ussdCode: status === 'PENDING' || status === 'INITIATED' ? p.ussdCode : null,
     completedAt: p.completedAt?.toISOString() ?? null,
     failureReason: status === 'FAILED' ? p.failureReason : null,
   };

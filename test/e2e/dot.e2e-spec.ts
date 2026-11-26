@@ -100,9 +100,11 @@ describe('public dot API: lookup → payment order → Monime webhook', () => {
     const conflict = await post('/v1/dot/payments', { obligationId, amount: '160000' }, key).expect(409);
     expect(conflict.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
 
-    const after = await get(`/v1/dot/payers/student/${REF}`).expect(200);
-    const t = after.body.obligations.find((o: { id: string }) => o.id === obligationId);
-    expect(t.holds).toEqual({ value: '150000', display: 'SLE 1,500.00' });
+    // awaiting payment holds nothing; once Monime is processing it, it holds the amount
+    const t = async () => (await get(`/v1/dot/payers/student/${REF}`).expect(200)).body.obligations.find((o: { id: string }) => o.id === obligationId);
+    expect((await t()).holds).toEqual({ value: '0', display: 'SLE 0.00' });
+    await http.post('/dev/monime/simulate-webhook').send({ paymentId, outcome: 'processing' }).expect(200);
+    expect((await t()).holds).toEqual({ value: '150000', display: 'SLE 1,500.00' });
   });
 
   it('is settled by payment.processing_completed matched on reference', async () => {

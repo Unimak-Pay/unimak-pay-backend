@@ -6,7 +6,9 @@ import { LEDGER_REPOSITORY, type LedgerRepository } from '../../ledger/applicati
 import { computePosition } from '../../ledger/domain/position';
 import { OutboxWriter } from '../../outbox/application/outbox-writer';
 import type { OutboxMessageInput } from '../../outbox/domain/messages';
+import { AuditService } from '../../audit/audit.service';
 import { ReceiptIssuer } from '../../receipts/application/receipt-issuer';
+import { auditDeleted } from './expire-payments.use-case';
 import { resolvePayerPhone } from '../domain/payer-phone';
 import { canTransition, isLateSettlement } from '../domain/payment-status';
 import { PAYMENT_REPOSITORY, type PaymentRecord, type PaymentRepository } from './payment.repository';
@@ -57,13 +59,14 @@ export class SettlePaymentService {
   constructor(
     private readonly receipts: ReceiptIssuer,
     private readonly outbox: OutboxWriter,
+    private readonly audit: AuditService,
     @Inject(PAYMENT_REPOSITORY) private readonly payments: PaymentRepository,
     @Inject(LEDGER_REPOSITORY) private readonly ledger: LedgerRepository,
   ) {}
 
   async applyCompleted(tx: Db, ev: CompletedMonimePayment): Promise<SettlementResult> {
     const found = await this.match(tx, ev);
-    if (!found) return { outcome: 'IGNORED', note: 'Not a UNIMAK payment', outboxKeys: [] };
+    if (!found) return notFound(ev);
     const p = (await this.payments.lockPayment(found.id, tx))!;
     const base = { paymentId: p.id, outboxKeys: [] as string[] };
 
@@ -140,6 +143,9 @@ export class SettlePaymentService {
       paymentId: p.id, payerId: o.payerId, obligationId: o.id, amount: p.amount, issuedAt: completedAt,
     });
 
+    // the payer's other attempts at this fee that never got paid are dropped (owner decision)
+    await auditDeleted(this.audit, await this.payments.deleteAwaitingPayment({ obligationId: o.id, exceptId: p.id }, tx), `another payment for this fee completed (${p.paymentRef})`, tx);
+
     const messages: OutboxMessageInput[] = [];
     if (o.feeTypeCode === APPLICATION_FEE_CODE) {
       messages.push({
@@ -160,6 +166,28 @@ export class SettlePaymentService {
     return { receiptNumber: receipt.number, outboxKeys, settlementAccount: o.settlementAccount, overpaidBy: position.balance < 0n ? -position.balance : 0n };
   }
 
+  /**
+   * payment.processing_started: the payer is paying. PENDING (or a late FAILED/EXPIRED)
+   * → PROCESSING, which holds the amount. Never moves a COMPLETED payment back.
+   */
+  async applyProcessingStarted(tx: Db, ev: CompletedMonimePayment): Promise<SettlementResult> {
+    const found = await this.match(tx, ev);
+    if (!found) return notFound(ev);
+    const p = (await this.payments.lockPayment(found.id, tx))!;
+    const base = { paymentId: p.id, outboxKeys: [] as string[] };
+    if (p.status === 'PROCESSING') return { ...base, outcome: 'PROCESSED', note: 'Already processing' };
+    if (p.status === 'COMPLETED') return { ...base, outcome: 'PROCESSED', note: 'Already completed; processing_started arrived late' };
+    if (ev.currency !== 'SLE' || ev.amount !== p.amount) {
+      return { ...base, outcome: 'UNMATCHED', note: `Monime is processing ${ev.currency} ${ev.amount}, payment is for SLE ${p.amount}` };
+    }
+    if (!canTransition(p.status, 'PROCESSING')) return { ...base, outcome: 'UNMATCHED', note: `Payment is ${p.status}` };
+    await this.payments.update(p.id, {
+      status: 'PROCESSING', processingAt: ev.occurredAt, failureReason: null,
+      monimeChannelType: ev.channelType ?? p.monimeChannelType ?? null,
+    }, tx);
+    return { ...base, outcome: 'PROCESSED' };
+  }
+
   /** Our payment id (reference / metadata) first, then the Monime object ids. */
   private async match(tx: Db, ev: CompletedMonimePayment): Promise<PaymentRecord | null> {
     const ids = new Set(
@@ -178,4 +206,19 @@ export class SettlePaymentService {
     }
     return this.payments.byMonimePaymentId(ev.monimePaymentId, tx);
   }
+}
+
+/**
+ * No payment matches. If Monime's metadata says it was ours (a payment deleted while
+ * awaiting payment, then paid with an old code or ref), it needs a person: UNMATCHED,
+ * so it shows in reconciliation. Otherwise it isn't a UNIMAK payment.
+ */
+function notFound(ev: CompletedMonimePayment): SettlementResult {
+  const ours = ev.metadata['paymentRef'] ?? ev.metadata['obligationId'] ?? PAYMENT_ID_METADATA_KEYS.map((k) => ev.metadata[k]).find(Boolean);
+  if (!ours) return { outcome: 'IGNORED', note: 'Not a UNIMAK payment', outboxKeys: [] };
+  return {
+    outcome: 'UNMATCHED',
+    note: `UNIMAK payment ${ev.metadata['paymentRef'] ?? ev.reference ?? '?'} not found (deleted while awaiting payment?); Monime ${ev.monimePaymentId} for obligation ${ev.metadata['obligationId'] ?? '?'}: apply or refund by hand`,
+    outboxKeys: [],
+  };
 }

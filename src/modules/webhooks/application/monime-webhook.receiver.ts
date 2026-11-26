@@ -117,6 +117,8 @@ export class MonimeWebhookReceiver {
   private dispatch(tx: Parameters<SettlePaymentService['applyCompleted']>[0], env: MonimeWebhookEnvelope): Promise<SettlementResult> {
     const at = eventTime(env, new Date());
     switch (env.event.name) {
+      case MONIME_EVENTS.paymentProcessingStarted:
+        return this.settle.applyProcessingStarted(tx, { ...parseCompletedPayment(env), occurredAt: at });
       case MONIME_EVENTS.paymentCompleted:
         return this.settle.applyCompleted(tx, { ...parseCompletedPayment(env), occurredAt: at });
       case MONIME_EVENTS.transferCompleted:

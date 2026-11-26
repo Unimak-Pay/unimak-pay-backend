@@ -3,7 +3,6 @@ import { assertCanInitiate } from './payment-policy';
 import { canTransition } from './payment-status';
 
 const now = new Date('2026-11-17T12:00:00Z');
-const in10 = new Date('2026-11-17T12:10:00Z');
 const APP = 15_000n;
 
 describe('application fee: once paid, a second payment is refused', () => {
@@ -20,14 +19,14 @@ describe('application fee: once paid, a second payment is refused', () => {
       .toThrow(expect.objectContaining({ code: 'OBLIGATION_SETTLED', message: expect.stringMatching(/application fee has already been paid/) }));
   });
 
-  it('refuses a second payment while the first is pending (hold covers balance)', () => {
-    const position = computePosition(APP, charged, [{ amount: APP, status: 'PENDING', expiresAt: in10 }], now);
+  it('refuses a second payment while Monime is processing the first (hold covers balance)', () => {
+    const position = computePosition(APP, charged, [{ amount: APP, status: 'PROCESSING', processingAt: now }], now);
     expect(() => assertCanInitiate({ feeTypeCode: 'APP', feeActive: true, position, minInstalment: APP, amount: APP }))
       .toThrow(expect.objectContaining({ code: 'INVALID_STATE' }));
   });
 
-  it('allows paying again after the first attempt expired', () => {
-    const position = computePosition(APP, charged, [{ amount: APP, status: 'PENDING', expiresAt: now }], now);
+  it('a payment merely awaiting payment blocks nothing', () => {
+    const position = computePosition(APP, charged, [{ amount: APP, status: 'PENDING', processingAt: null }], now);
     expect(() => assertCanInitiate({ feeTypeCode: 'APP', feeActive: true, position, minInstalment: APP, amount: APP })).not.toThrow();
   });
 
@@ -39,7 +38,7 @@ describe('application fee: once paid, a second payment is refused', () => {
 });
 
 describe('instalment bounds: min ≤ amount ≤ payable', () => {
-  const position = computePosition(300_000n, [{ type: 'CHARGE', amount: 300_000n }], [{ amount: 100_000n, status: 'PENDING', expiresAt: in10 }], now);
+  const position = computePosition(300_000n, [{ type: 'CHARGE', amount: 300_000n }], [{ amount: 100_000n, status: 'PROCESSING', processingAt: now }], now);
   const base = { feeTypeCode: 'TUITION', feeActive: true, position, minInstalment: 50_000n };
   it('rejects below minimum', () => expect(() => assertCanInitiate({ ...base, amount: 49_999n })).toThrow(expect.objectContaining({ code: 'AMOUNT_BELOW_MIN_INSTALMENT' })));
   it('rejects above payable (balance − holds)', () => expect(() => assertCanInitiate({ ...base, amount: 200_001n })).toThrow(expect.objectContaining({ code: 'AMOUNT_EXCEEDS_PAYABLE' })));

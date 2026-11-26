@@ -8,7 +8,6 @@ import { PAYMENT_REF } from '../../payments/domain/payment-ref';
 import { academicYearOf, paymentMethodLabel, shownInHistory } from '../domain/history';
 
 const money = (v: bigint) => ({ value: v.toString(), display: formatSle(v) });
-const isOpen = (s: string) => s === 'INITIATED' || s === 'PENDING';
 
 /** History and receipts read COMPLETED only as Monime confirmed it; nothing the dot sent decides it. */
 @Injectable()
@@ -40,7 +39,7 @@ export class PaymentHistoryQuery {
         feeName: p.obligation.fee.name,
         period: p.obligation.fee.period,
         amount: money(p.amount),
-        status: isOpen(p.status) && p.expiresAt <= now ? 'EXPIRED' : p.status,
+        status: p.status,
         paidBy: { name: p.paidByName, self: p.payingForSelf },
         method: paymentMethodLabel(p.monimeChannelType),
         receiptNumber: p.status === 'COMPLETED' ? (p.receipt?.number ?? null) : null,

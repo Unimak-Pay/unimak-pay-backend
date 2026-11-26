@@ -15,13 +15,14 @@ export class SimulateWebhookDto {
   payoutId?: string;
 
   /**
-   * payment:  completed → payment.processing_completed; failed/expired → payment code
-   *           cancelled/expired in the mock + reconciliation (no webhook)
+   * payment:  processing → payment.processing_started; completed → payment.processing_completed;
+   *           failed/expired → the payment code is cancelled/expired in the mock (no webhook;
+   *           the payment stays PENDING: payments don't expire)
    * transfer: completed | failed → internal_transfer.*
    * payout:   completed | failed → payout.*
    */
-  @IsIn(['completed', 'failed', 'expired'])
-  outcome!: 'completed' | 'failed' | 'expired';
+  @IsIn(['processing', 'completed', 'failed', 'expired'])
+  outcome!: 'processing' | 'completed' | 'failed' | 'expired';
 
   /** Override the reported amount (minor units) to test mismatches. */
   @IsOptional()

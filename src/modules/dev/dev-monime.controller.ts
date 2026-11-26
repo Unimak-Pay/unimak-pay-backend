@@ -45,11 +45,24 @@ export class DevMonimeController {
     const o = (await this.payments.obligationInfo(p.obligationId))!;
     const mock = this.mock();
 
-    if (dto.outcome !== 'completed') {
-      if (!mock || !p.monimeRef) throw new BadRequestException('failed/expired needs MONIME_MODE=mock and a PENDING payment');
+    if (dto.outcome === 'failed' || dto.outcome === 'expired') {
+      if (!mock || !p.monimeRef) throw new BadRequestException('failed/expired needs MONIME_MODE=mock and a payment with a payment code');
       await mock.setStatus(p.monimeRef, dto.outcome === 'failed' ? 'cancelled' : 'expired');
       const after = await this.reconcile.execute(p.id);
-      return { simulated: dto.outcome, paymentStatus: after.status, note: 'Payment code closed in the mock; payment closed via reconciliation' };
+      return { simulated: dto.outcome, paymentStatus: after.status, note: 'Payment code closed in the mock; our payment stays as it is (payments do not expire)' };
+    }
+    if (dto.outcome === 'processing') {
+      const monimePaymentId = `pay-mock-${p.id.slice(0, 8)}`;
+      return this.deliver(dto, MONIME_EVENTS.paymentProcessingStarted, { id: monimePaymentId, type: 'payment' }, {
+        id: monimePaymentId,
+        status: 'processing',
+        amount: { currency: 'SLE', value: Number(dto.amount ?? p.amount) },
+        channel: { type: 'momo', provider: 'm17', reference: 'mock' },
+        reference: p.id,
+        financialAccountId: o.settlementAccount,
+        metadata: { paymentId: p.id, ...(dto.metadata ?? {}) },
+        createTime: p.createdAt.toISOString(),
+      });
     }
 
     if (mock && p.monimeRef) await mock.setStatus(p.monimeRef, 'completed');

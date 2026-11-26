@@ -237,7 +237,7 @@ describe('USSD payment journey (collect_payment)', () => {
     expect(await prisma.payment.count({ where: { idempotencyKey: { startsWith: s.id } } })).toBe(0);
   });
 
-  it('collection never fails once at Monime: a late completion after expiry is still applied (overpayment flagged)', async () => {
+  it('an unpaid attempt is deleted when another payment for the fee completes; if it is paid later it is flagged, not lost', async () => {
     async function startAppFee(): Promise<string> {
       const { s } = await toPayer('pay', 'applicant', 'APP-2026-0002');
       const fees = (await s.step('confirm_payer', 'continue')) as Nav;
@@ -251,16 +251,20 @@ describe('USSD payment journey (collect_payment)', () => {
         fees: [{ code: 'processing', amount: { currency: 'SLE', value: 150 } }], // USSD 1%
       }).expect(200);
 
+    // the payer starts, walks away (PENDING holds nothing), then starts again and pays
     const first = await startAppFee();
-    // the payer took longer than 15 min to approve: the hold lapses…
-    await prisma.payment.update({ where: { id: first }, data: { expiresAt: new Date(Date.now() - 1000) } });
-    await http.get('/cron/expire-payments').set('authorization', `Bearer ${process.env.CRON_SECRET}`).expect(200);
-    // …someone pays again and it completes
+    const firstRef = (await prisma.payment.findUniqueOrThrow({ where: { id: first } })).paymentRef;
     const second = await startAppFee();
+    expect(second).not.toBe(first);
     expect((await complete(second, 'pay-app-2')).body.result).toBe('PROCESSED');
-    // then the first one completes after all: money moved, so it is applied
-    const late = await complete(first, 'pay-app-1');
-    expect(late.body).toMatchObject({ result: 'PROCESSED', note: 'Late settlement: payment was EXPIRED; Overpaid by 15000 (obligation balance below zero)' });
-    expect(await prisma.payment.findUnique({ where: { id: first } })).toMatchObject({ status: 'COMPLETED' });
+    // the unpaid attempt is gone (audited)
+    expect(await prisma.payment.findUnique({ where: { id: first } })).toBeNull();
+    expect(await prisma.auditLog.count({ where: { action: 'payment.delete_awaiting', entityId: first } })).toBe(1);
+    // if its code is paid after all, the money is flagged for a person, never ignored
+    const late = await monimeEvent(http, 'payment.processing_completed', { id: 'pay-app-1', type: 'payment' }, {
+      id: 'pay-app-1', status: 'completed', amount: { currency: 'SLE', value: 15000 }, reference: first,
+      metadata: { paymentId: first, paymentRef: firstRef },
+    }).expect(200);
+    expect(late.body).toMatchObject({ result: 'UNMATCHED', note: expect.stringContaining(`UNIMAK payment ${firstRef} not found`) });
   });
 });

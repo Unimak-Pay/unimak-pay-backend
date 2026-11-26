@@ -257,7 +257,8 @@ export class AdminOpsService {
       stuckPayouts: { status: { in: ['REQUESTED', 'SUBMITTED', 'PROCESSING'] }, createdAt: { lt: hourAgo } } satisfies Prisma.PayoutWhereInput,
       failedPayouts: { status: 'FAILED', updatedAt: { gt: new Date(now.getTime() - 7 * 24 * HOUR) } } satisfies Prisma.PayoutWhereInput,
       deadOutbox: { status: 'DEAD', ...outboxScope(admin) } satisfies Prisma.OutboxMessageWhereInput,
-      staleOpenPayments: { status: { in: ['INITIATED', 'PENDING'] }, expiresAt: { lt: now } } satisfies Prisma.PaymentWhereInput,
+      // Monime said processing started an hour ago and nothing completed it yet
+      staleOpenPayments: { status: 'PROCESSING', processingAt: { lt: new Date(now.getTime() - 60 * 60_000) } } satisfies Prisma.PaymentWhereInput,
     };
     // Lists show the latest SUMMARY_LIST_LIMIT of each; counts are exact.
     const take = SUMMARY_LIST_LIMIT;
@@ -269,7 +270,7 @@ export class AdminOpsService {
       this.prisma.payout.findMany({ where: w.stuckPayouts, orderBy: { createdAt: 'asc' }, take }),
       this.prisma.payout.findMany({ where: w.failedPayouts, orderBy: { updatedAt: 'desc' }, take }),
       this.prisma.outboxMessage.findMany({ where: w.deadOutbox, orderBy: { createdAt: 'desc' }, take }),
-      this.prisma.payment.findMany({ where: w.staleOpenPayments, orderBy: { expiresAt: 'asc' }, take }),
+      this.prisma.payment.findMany({ where: w.staleOpenPayments, orderBy: { processingAt: 'asc' }, take }),
       Promise.all([
         this.prisma.reconciliationItem.count({ where: w.openItems }),
         this.prisma.webhookEvent.count({ where: w.webhookEvents }),

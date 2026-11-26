@@ -33,7 +33,7 @@ export class CronController {
   /**
    * Nightly: compare yesterday (UTC) with Monime, then the housekeeping the
    * 5-minute crons do — on plans that only allow daily crons this is the
-   * fallback (Supabase pg_cron also expires payments every 5 minutes).
+   * fallback.
    */
   @Get('reconcile')
   async reconcile() {
@@ -44,14 +44,16 @@ export class CronController {
   }
 
   /**
-   * Open payments past expiry (Monime never called back) → EXPIRED; old USSD sessions
-   * removed; portal events older than 90 days purged (they hold names and phones).
+   * Payment housekeeping (payments don't expire): PROCESSING with no completion for 24 h
+   * → PENDING; payments still awaiting payment after PENDING_PAYMENT_RETENTION_DAYS
+   * deleted (audited). Old USSD sessions removed; portal events older than 90 days
+   * purged (they hold names and phones). The path keeps its old name for the schedulers.
    */
   @Get('expire-payments')
   async expirePayments() {
-    const expired = await this.expire.execute();
+    const { processingReset, pendingDeleted } = await this.expire.execute();
     const { count: ussdSessions } = await this.prisma.ussdSession.deleteMany({ where: { updatedAt: { lt: new Date(Date.now() - 24 * 60 * 60_000) } } });
     const { count: portalEvents } = await this.prisma.portalEvent.deleteMany({ where: { receivedAt: { lt: new Date(Date.now() - PORTAL_EVENT_RETENTION_DAYS * 24 * 60 * 60_000) } } });
-    return { expired, ussdSessionsDeleted: ussdSessions, portalEventsDeleted: portalEvents };
+    return { processingReset, pendingDeleted, ussdSessionsDeleted: ussdSessions, portalEventsDeleted: portalEvents };
   }
 }

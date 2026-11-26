@@ -24,11 +24,11 @@ describe('academic year', () => {
 describe('what history shows', () => {
   const now = new Date('2026-11-26T12:00:00Z');
   const days = (n: number) => new Date(now.getTime() - n * 86_400_000);
-  it('completed always, open while open, failed/expired for 30 days', () => {
-    expect(shownInHistory({ status: 'COMPLETED', expiresAt: days(400), createdAt: days(400) }, now)).toBe(true);
-    expect(shownInHistory({ status: 'PENDING', expiresAt: new Date(now.getTime() + 60_000), createdAt: days(0) }, now)).toBe(true);
-    expect(shownInHistory({ status: 'FAILED', expiresAt: days(29), createdAt: days(29) }, now)).toBe(true);
-    expect(shownInHistory({ status: 'EXPIRED', expiresAt: days(31), createdAt: days(31) }, now)).toBe(false);
-    expect(shownInHistory({ status: 'PENDING', expiresAt: days(40), createdAt: days(40) }, now)).toBe(false);
+  it('completed and open always, failed/expired for 30 days', () => {
+    expect(shownInHistory({ status: 'COMPLETED', createdAt: days(400) }, now)).toBe(true);
+    expect(shownInHistory({ status: 'PENDING', createdAt: days(6) }, now)).toBe(true);
+    expect(shownInHistory({ status: 'PROCESSING', createdAt: days(1) }, now)).toBe(true);
+    expect(shownInHistory({ status: 'FAILED', createdAt: days(29) }, now)).toBe(true);
+    expect(shownInHistory({ status: 'EXPIRED', createdAt: days(31) }, now)).toBe(false);
   });
 });

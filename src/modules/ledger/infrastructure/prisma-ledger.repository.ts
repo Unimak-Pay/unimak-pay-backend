@@ -26,8 +26,8 @@ export class PrismaLedgerRepository implements LedgerRepository {
         _sum: { amount: true },
       }),
       db.payment.findMany({
-        where: { obligationId: { in: ids }, status: { in: ['INITIATED', 'PENDING'] } },
-        select: { obligationId: true, amount: true, status: true, expiresAt: true },
+        where: { obligationId: { in: ids }, status: 'PROCESSING' },
+        select: { obligationId: true, amount: true, status: true, processingAt: true },
       }),
     ]);
     for (const e of entries) {

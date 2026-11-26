@@ -307,8 +307,9 @@ function friendly(err: DomainError): string {
 
 const STATUS_LINE: Record<PaymentStatusView['status'], string> = {
   COMPLETED: 'PAID',
-  PENDING: 'PENDING - waiting for confirmation',
-  INITIATED: 'PENDING - waiting for confirmation',
+  PENDING: 'AWAITING PAYMENT',
+  INITIATED: 'AWAITING PAYMENT',
+  PROCESSING: 'PROCESSING - waiting for confirmation',
   EXPIRED: 'NOT COMPLETED (expired). If money left your wallet it will be applied automatically.',
   FAILED: 'FAILED. Nothing was applied.',
 };

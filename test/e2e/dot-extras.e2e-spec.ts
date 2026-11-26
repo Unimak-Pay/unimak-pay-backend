@@ -244,6 +244,9 @@ describe('payment history and receipts', () => {
   });
 
   it('lists every payment for the payer, newest first, with who paid and how', async () => {
+    // the unpaid attempt from earlier was deleted when another payment for the fee completed
+    expect(await prisma.payment.findUnique({ where: { clientId_idempotencyKey: { clientId: 'dash-dot', idempotencyKey: 'pay-dxt-0006' } } })).toBeNull();
+    const awaiting = await mine().post('/v1/dot/payments', { obligationId, amount: '1000' }, 'pay-dxt-awaiting-01').expect(201);
     // a failed payment from 40 days ago is left out; one from 5 days ago is shown
     const old = await mine().post('/v1/dot/payments', { obligationId, amount: '1000' }, 'pay-dxt-old-01').expect(201);
     const recent = await mine().post('/v1/dot/payments', { obligationId, amount: '1000' }, 'pay-dxt-recent-01').expect(201);
@@ -263,7 +266,7 @@ describe('payment history and receipts', () => {
     expect(sponsor).toHaveLength(1);
     expect(sponsor[0]).toMatchObject({ paidBy: { name: 'Fatmata', self: false }, amount: { value: '12000' } });
     const pending = res.body.payments.find((p: { status: string }) => p.status === 'PENDING');
-    expect(pending).toMatchObject({ receiptNumber: null, completedAt: null, method: null });
+    expect(pending).toMatchObject({ paymentRef: awaiting.body.paymentRef, receiptNumber: null, completedAt: null, method: null });
     const times = res.body.payments.map((p: { createdAt: string }) => p.createdAt);
     expect([...times].sort().reverse()).toEqual(times);
     expect(JSON.stringify(res.body)).not.toMatch(/76500501|\+232/);
@@ -313,9 +316,9 @@ describe('exam clearance', () => {
     expect((await bursar.get('/v1/admin/clearance-policy').expect(200)).body.examName).toBe('DXT exams');
   });
 
-  it('NOT_CLEARED lists what blocks it; money held by an open payment does not count', async () => {
+  it('NOT_CLEARED lists what blocks it; a payment not yet completed does not count', async () => {
     const res = await mine().get(`/v1/dot/payers/student/${ME}/clearance`).expect(200);
-    // 30,000 billed − 25,000 completed; the open 1,000 payment is still owed
+    // 30,000 billed − 25,000 completed; the 1,000 payment still awaiting payment is still owed
     expect(res.body).toEqual({
       status: 'NOT_CLEARED', exam: { name: 'DXT exams', period: '2026/27' },
       outstanding: { value: '5000', display: 'SLE 50.00' },
@@ -325,10 +328,10 @@ describe('exam clearance', () => {
   });
 
   it('CLEARED once paid, with a pass whose public page checks live', async () => {
-    const open = await prisma.payment.findUniqueOrThrow({ where: { clientId_idempotencyKey: { clientId: 'dash-dot', idempotencyKey: 'pay-dxt-0006' } } });
-    await complete(open.id);
-    const last = await mine().post('/v1/dot/payments', { obligationId, amount: '4000', payingForSelf: true }, 'pay-dxt-clear-01').expect(201);
+    const last = await mine().post('/v1/dot/payments', { obligationId, amount: '5000', payingForSelf: true }, 'pay-dxt-clear-01').expect(201);
     await complete(last.body.paymentId);
+    // and the 1,000 attempt that was never paid is gone
+    expect(await prisma.payment.findUnique({ where: { clientId_idempotencyKey: { clientId: 'dash-dot', idempotencyKey: 'pay-dxt-awaiting-01' } } })).toBeNull();
 
     const res = await mine().get(`/v1/dot/payers/student/${ME}/clearance`).expect(200);
     expect(res.body).toMatchObject({ status: 'CLEARED', outstanding: { value: '0' }, blocking: [], passCode: expect.stringMatching(/^[2-9A-HJKMNP-Z]{8}$/), issuedAt: expect.any(String) });

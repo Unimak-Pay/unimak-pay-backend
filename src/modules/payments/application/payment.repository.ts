@@ -41,6 +41,8 @@ export interface PaymentRecord {
   payingForSelf: boolean;
   /** Monime channel.type once completed: bank | card | momo | wallet */
   monimeChannelType: string | null;
+  /** Monime's payment.processing_started */
+  processingAt: Date | null;
   createdAt: Date;
 }
 
@@ -100,10 +102,15 @@ export interface PaymentRepository {
   create(p: NewPayment, db: Db): Promise<PaymentRecord>;
   update(
     id: string,
-    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'ussdCode' | 'monimePaymentId' | 'monimeOrderNumber' | 'monimeChannelType' | 'payerPhone' | 'completedAt' | 'failureReason'>>,
+    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'ussdCode' | 'monimePaymentId' | 'monimeOrderNumber' | 'monimeChannelType' | 'payerPhone' | 'processingAt' | 'completedAt' | 'failureReason'>>,
     db?: Db,
   ): Promise<PaymentRecord>;
-  /** Marks open payments past expiry as EXPIRED. Returns count. */
-  expireDue(now: Date, obligationId?: string, db?: Db): Promise<number>;
+  /** PROCESSING with nothing from Monime for PROCESSING_TIMEOUT → back to PENDING. Returns count. */
+  resetStaleProcessing(now: Date, db?: Db): Promise<number>;
+  /**
+   * Permanently deletes payments awaiting payment (INITIATED/PENDING: no ledger entry,
+   * receipt or money) that match; returns what was deleted, for the audit log.
+   */
+  deleteAwaitingPayment(where: { obligationId?: string; exceptId?: string; createdBefore?: Date }, db?: Db): Promise<PaymentRecord[]>;
   obligationInfo(obligationId: string, db?: Db): Promise<LockedObligation | null>;
 }

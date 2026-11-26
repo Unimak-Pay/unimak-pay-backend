@@ -153,6 +153,6 @@ describe('nightly reconciliation against Monime', () => {
     expect(second.body).toMatchObject({ skipped: true, runId: expect.any(String) });
     expect(first.body.id ?? first.body.runId).toBeTruthy();
     // daily-cron plans: the same call does the 5-minute housekeeping
-    expect(first.body).toMatchObject({ housekeeping: { expired: expect.any(Number) }, outbox: { claimed: expect.any(Number) } });
+    expect(first.body).toMatchObject({ housekeeping: { processingReset: expect.any(Number), pendingDeleted: expect.any(Number) }, outbox: { claimed: expect.any(Number) } });
   });
 });

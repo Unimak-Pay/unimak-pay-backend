@@ -177,11 +177,15 @@ export class EnvSchema {
   @MinLength(16)
   CRON_SECRET!: string;
 
+  /**
+   * Payments awaiting payment (PENDING) never expire; the cleanup deletes them after
+   * this many days (docs/payment-lifecycle.md).
+   */
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(120)
-  PAYMENT_EXPIRY_MINUTES = 15;
+  @Max(365)
+  PENDING_PAYMENT_RETENTION_DAYS = 7;
 
   /**
    * Shared with the university portal: it signs POST /v1/portal/events with this

@@ -77,11 +77,16 @@ describe('GET /v1/admin/reports/summary', () => {
     expect(after.commission).toMatchObject({ transferred: expect.any(Object), inFlight: expect.any(Object), failed: expect.any(Object) });
     expect(after.payouts).toMatchObject({ paidOut: expect.any(Object) });
 
-    // the pending one expires: it moves to "expired" without the sweep having run
+    // payments don't expire: past its old expiry time it is still pending; once Monime
+    // starts processing it, it moves to "processing"
     await prisma.payment.update({ where: { id: pending }, data: { expiresAt: new Date(Date.now() - 1000) } });
     const later = (await report(`?from=${today}&to=${today}`).expect(200)).body;
-    expect(later.payments.pending.count).toBe(after.payments.pending.count - 1);
-    expect(later.payments.expired.count).toBe(after.payments.expired.count + 1);
+    expect(later.payments.pending.count).toBe(after.payments.pending.count);
+    expect(later.payments.expired.count).toBe(after.payments.expired.count);
+    await http.post('/dev/monime/simulate-webhook').send({ paymentId: pending, outcome: 'processing' }).expect(200);
+    const processing = (await report(`?from=${today}&to=${today}`).expect(200)).body;
+    expect(processing.payments.pending.count).toBe(after.payments.pending.count - 1);
+    expect(processing.payments.processing.count).toBe(after.payments.processing.count + 1);
   });
 
   it('filters by fee type and channel; defaults to the last 30 days', async () => {

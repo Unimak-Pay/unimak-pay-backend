@@ -32,12 +32,11 @@ export function academicYearOf(periods: readonly string[]): string | null {
 export const HISTORY_RECENT_DAYS = 30;
 
 /**
- * Which payments the history lists: every completed one, every one still open, and
- * failed or expired ones from the last 30 days. An open payment past its expiry is
- * already EXPIRED (the sweep may not have run).
+ * Which payments the history lists: completed ones, open ones (awaiting payment or
+ * processing; they never expire, the cleanup deletes unpaid ones), and failed or
+ * expired ones from the last 30 days.
  */
-export function shownInHistory(p: { status: string; expiresAt: Date; createdAt: Date }, now: Date): boolean {
-  if (p.status === 'COMPLETED') return true;
-  const open = (p.status === 'INITIATED' || p.status === 'PENDING') && p.expiresAt > now;
-  return open || now.getTime() - p.createdAt.getTime() <= HISTORY_RECENT_DAYS * 86_400_000;
+export function shownInHistory(p: { status: string; createdAt: Date }, now: Date): boolean {
+  if (p.status === 'COMPLETED' || p.status === 'INITIATED' || p.status === 'PENDING' || p.status === 'PROCESSING') return true;
+  return now.getTime() - p.createdAt.getTime() <= HISTORY_RECENT_DAYS * 86_400_000;
 }

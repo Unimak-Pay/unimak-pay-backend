@@ -54,22 +54,29 @@ describe('channel API happy path: lookup → initiate → webhook → receipt + 
     expect(await prisma.ledgerEntry.count({ where: { obligationId } })).toBe(1);
   });
 
-  it('initiates a payment (PENDING, 15 min expiry) and holds the balance', async () => {
+  it('initiates a payment (PENDING, no expiry: deleted after 7 days if unpaid); it holds only once Monime is processing it', async () => {
     const body = { obligationId, amount: '50000', payerPhone: '+23299100004', channel: 'USSD', idempotencyKey: 'e2e-app-0004-1' };
     const res = await channel('post', '/v1/channel/payments', body).expect(201);
     expect(res.body.status).toBe('PENDING');
     expect(res.body.paymentRef).toMatch(/^[1-9]\d{7}$/);
     expect(res.body.ussdCode).toMatch(/^\*715\*1\*\d+#$/);
-    const mins = (new Date(res.body.expiresAt).getTime() - Date.now()) / 60_000;
-    expect(mins).toBeGreaterThan(14);
-    expect(mins).toBeLessThanOrEqual(15);
+    const days = (new Date(res.body.expiresAt).getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(6.99);
+    expect(days).toBeLessThanOrEqual(7);
     paymentId = res.body.paymentId;
 
     const replay = await channel('post', '/v1/channel/payments', body).expect(201);
     expect(replay.body.paymentId).toBe(paymentId);
 
     const ob = await channel('get', `/v1/channel/payers/applicant/${ref}/obligations`).expect(200);
-    expect(ob.body.obligations[0]).toMatchObject({ holds: { value: '50000' }, payable: { value: '0' } });
+    expect(ob.body.obligations[0]).toMatchObject({ holds: { value: '0' }, payable: { value: '50000' } });
+
+    // payment.processing_started: PROCESSING, and now it holds the amount
+    const started = await http.post('/dev/monime/simulate-webhook').send({ paymentId, outcome: 'processing' }).expect(200);
+    expect(started.body.ack).toMatchObject({ result: 'PROCESSED' });
+    expect((await channel('get', `/v1/channel/payments/${paymentId}`).expect(200)).body.status).toBe('PROCESSING');
+    const held = await channel('get', `/v1/channel/payers/applicant/${ref}/obligations`).expect(200);
+    expect(held.body.obligations[0]).toMatchObject({ holds: { value: '50000' }, payable: { value: '0' } });
 
     const p = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     // USSD: total 2.5% = 1250, Monime 1% = 500, platform 750

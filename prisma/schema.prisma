@@ -62,7 +62,10 @@ enum CollectionMethod {
 
 enum PaymentStatus {
   INITIATED
+  /// awaiting payment; never expires (deleted after PENDING_PAYMENT_RETENTION_DAYS)
   PENDING
+  /// Monime's payment.processing_started; holds the amount
+  PROCESSING
   COMPLETED
   FAILED
   EXPIRED
@@ -291,7 +294,10 @@ model Payment {
   monimeFee         BigInt
   platformFee       BigInt
   netAmount         BigInt
+  /// when a payment awaiting payment is deleted (created + PENDING_PAYMENT_RETENTION_DAYS); older rows: their old 15-minute expiry
   expiresAt         DateTime
+  /// Monime's payment.processing_started
+  processingAt      DateTime?
   completedAt       DateTime?
   failureReason     String?
   createdAt         DateTime         @default(now())

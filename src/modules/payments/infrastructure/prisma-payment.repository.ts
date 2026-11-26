@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { type Db, PrismaService } from '../../../shared/infrastructure/prisma.service';
+import { PROCESSING_TIMEOUT_MS } from '../../ledger/domain/position';
 import type {
   LockedObligation,
   NewPayment,
@@ -82,15 +83,26 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return db.payment.update({ where: { id }, data: patch });
   }
 
-  async expireDue(now: Date, obligationId?: string, db: Db = this.prisma): Promise<number> {
+  async resetStaleProcessing(now: Date, db: Db = this.prisma): Promise<number> {
     const r = await db.payment.updateMany({
-      where: {
-        status: { in: ['INITIATED', 'PENDING'] },
-        expiresAt: { lte: now },
-        ...(obligationId ? { obligationId } : {}),
-      },
-      data: { status: 'EXPIRED', failureReason: 'expired' },
+      where: { status: 'PROCESSING', processingAt: { lte: new Date(now.getTime() - PROCESSING_TIMEOUT_MS) } },
+      data: { status: 'PENDING', processingAt: null },
     });
     return r.count;
+  }
+
+  async deleteAwaitingPayment(w: { obligationId?: string; exceptId?: string; createdBefore?: Date }, db: Db = this.prisma): Promise<PaymentRecord[]> {
+    const where = {
+      status: { in: ['INITIATED', 'PENDING'] as ('INITIATED' | 'PENDING')[] },
+      ...(w.obligationId ? { obligationId: w.obligationId } : {}),
+      ...(w.exceptId ? { id: { not: w.exceptId } } : {}),
+      ...(w.createdBefore ? { createdAt: { lt: w.createdBefore } } : {}),
+      // never one that already has money attached (defensive: awaiting payments don't)
+      ledgerEntry: null,
+      receipt: null,
+    };
+    const rows = await db.payment.findMany({ where });
+    if (rows.length) await db.payment.deleteMany({ where: { id: { in: rows.map((r) => r.id) }, status: { in: ['INITIATED', 'PENDING'] } } });
+    return rows;
   }
 }

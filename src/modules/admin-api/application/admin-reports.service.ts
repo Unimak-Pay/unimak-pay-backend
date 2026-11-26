@@ -78,7 +78,7 @@ export class AdminReportsService {
         SELECT p.channel::text AS channel, SUM(p.amount)::bigint AS amount, COUNT(*)::int AS count
         ${from_} WHERE ${completed} GROUP BY 1 ORDER BY 1`,
       this.prisma.$queryRaw<{ status: string; count: number; amount: bigint }[]>`
-        SELECT CASE WHEN p.status IN ('INITIATED', 'PENDING') AND p."expiresAt" <= ${now} THEN 'EXPIRED' ELSE p.status::text END AS status,
+        SELECT p.status::text AS status,
                COUNT(*)::int AS count, SUM(p.amount)::bigint AS amount
         ${from_} WHERE p."createdAt" >= ${start} AND p."createdAt" < ${end} AND ${where} GROUP BY 1`,
       // grouped by each department's current faculty
@@ -130,6 +130,7 @@ export class AdminReportsService {
         started,
         completed: funnelBy('COMPLETED'),
         pending: { count: funnelBy('INITIATED').count + funnelBy('PENDING').count, amount: funnelBy('INITIATED').amount + funnelBy('PENDING').amount },
+        processing: funnelBy('PROCESSING'),
         failed: funnelBy('FAILED'),
         expired: funnelBy('EXPIRED'),
         /** completed ÷ started, 0–1 */

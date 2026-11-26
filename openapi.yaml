@@ -1336,8 +1336,9 @@ paths:
                       started: { type: integer }
                       completed: { $ref: '#/components/schemas/CountAmount' }
                       pending: { $ref: '#/components/schemas/CountAmount' }
+                      processing: { $ref: '#/components/schemas/CountAmount' }
                       failed: { $ref: '#/components/schemas/CountAmount' }
-                      expired: { $ref: '#/components/schemas/CountAmount' }
+                      expired: { $ref: '#/components/schemas/CountAmount', description: 'Payments made before payments stopped expiring (2026-11-28)' }
                       completionRate: { type: [number, 'null'], minimum: 0, maximum: 1 }
                   commission:
                     type: [object, 'null']
@@ -3377,7 +3378,7 @@ components:
         sentAt: { type: [ string, "null" ], format: date-time }
     Payment:
       type: object
-      required: [ id, obligationId, amount, channel, clientId, idempotencyKey, paymentRef, payerPhone, phoneAuthorized, collectionMethod, status, monimeRef, ussdCode, monimePaymentId, monimeOrderNumber, pricingConfigId, monimeFee, platformFee, netAmount, expiresAt, completedAt, failureReason, createdAt, updatedAt, payRequestId, paidByName, payingForSelf, monimeChannelType ]
+      required: [ id, obligationId, amount, channel, clientId, idempotencyKey, paymentRef, payerPhone, phoneAuthorized, collectionMethod, status, monimeRef, ussdCode, monimePaymentId, monimeOrderNumber, pricingConfigId, monimeFee, platformFee, netAmount, expiresAt, processingAt, completedAt, failureReason, createdAt, updatedAt, payRequestId, paidByName, payingForSelf, monimeChannelType ]
       properties:
         id: { type: string, format: uuid }
         obligationId: { type: string, format: uuid }
@@ -3398,7 +3399,8 @@ components:
         monimeFee: { type: string, pattern: ^-?\d+$, description: SLE minor units }
         platformFee: { type: string, pattern: ^-?\d+$, description: SLE minor units }
         netAmount: { type: string, pattern: ^-?\d+$, description: SLE minor units }
-        expiresAt: { type: string, format: date-time }
+        expiresAt: { description: "when a payment awaiting payment is deleted (created + PENDING_PAYMENT_RETENTION_DAYS); older rows: their old 15-minute expiry", type: string, format: date-time }
+        processingAt: { description: Monime's payment.processing_started, type: [ string, "null" ], format: date-time }
         completedAt: { type: [ string, "null" ], format: date-time }
         failureReason: { type: [ string, "null" ] }
         createdAt: { type: string, format: date-time }
@@ -3565,7 +3567,7 @@ components:
       enum: [ APPLICANT, STUDENT ]
     PaymentStatus:
       type: string
-      enum: [ INITIATED, PENDING, COMPLETED, FAILED, EXPIRED ]
+      enum: [ INITIATED, PENDING, PROCESSING, COMPLETED, FAILED, EXPIRED ]
     PayoutStatus:
       type: string
       enum: [ REQUESTED, SUBMITTED, PROCESSING, COMPLETED, FAILED ]

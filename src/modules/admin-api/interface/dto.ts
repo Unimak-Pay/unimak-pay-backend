@@ -20,8 +20,8 @@ export class PageQuery {
 }
 
 export class PaymentsQuery extends PageQuery {
-  @IsOptional() @IsIn(['INITIATED', 'PENDING', 'COMPLETED', 'FAILED', 'EXPIRED'])
-  status?: 'INITIATED' | 'PENDING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
+  @IsOptional() @IsIn(['INITIATED', 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'EXPIRED'])
+  status?: 'INITIATED' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
 
   @IsOptional() @IsIn(['USSD', 'DOTS'])
   channel?: 'USSD' | 'DOTS';
@@ -57,8 +57,8 @@ export class PaymentsQuery extends PageQuery {
 
 /** Same filters as the list, no paging. */
 export class PaymentsExportQuery {
-  @IsOptional() @IsIn(['INITIATED', 'PENDING', 'COMPLETED', 'FAILED', 'EXPIRED'])
-  status?: 'INITIATED' | 'PENDING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
+  @IsOptional() @IsIn(['INITIATED', 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'EXPIRED'])
+  status?: 'INITIATED' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
 
   @IsOptional() @IsIn(['USSD', 'DOTS'])
   channel?: 'USSD' | 'DOTS';

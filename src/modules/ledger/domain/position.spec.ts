@@ -1,9 +1,9 @@
 import { computePosition, type HoldLike } from './position';
 
 const now = new Date('2026-11-17T12:00:00Z');
-const later = new Date('2026-11-17T12:10:00Z');
 const earlier = new Date('2026-11-17T11:50:00Z');
-const hold = (amount: bigint, status: HoldLike['status'], expiresAt = later): HoldLike => ({ amount, status, expiresAt });
+const dayAgo = new Date('2026-11-16T12:00:00Z');
+const hold = (amount: bigint, status: HoldLike['status'], processingAt: Date | null = status === 'PROCESSING' ? earlier : null): HoldLike => ({ amount, status, processingAt });
 
 describe('computePosition (holds / payable)', () => {
   const charge = { type: 'CHARGE' as const, amount: 300_000n };
@@ -19,14 +19,15 @@ describe('computePosition (holds / payable)', () => {
     expect(p).toMatchObject({ paid: 100_000n, balance: 200_000n, payable: 200_000n });
   });
 
-  it('pending and initiated payments are holds', () => {
-    const p = computePosition(300_000n, [charge], [hold(50_000n, 'PENDING'), hold(25_000n, 'INITIATED')], now);
-    expect(p).toMatchObject({ balance: 300_000n, holds: 75_000n, payable: 225_000n });
+  it('only payments Monime is processing are holds', () => {
+    const p = computePosition(300_000n, [charge], [hold(50_000n, 'PROCESSING'), hold(25_000n, 'PENDING'), hold(25_000n, 'INITIATED')], now);
+    expect(p).toMatchObject({ balance: 300_000n, holds: 50_000n, payable: 250_000n });
   });
 
-  it('expired, failed and completed payments are not holds', () => {
+  it('awaiting payment, stale processing, failed, expired and completed payments are not holds', () => {
     const p = computePosition(300_000n, [charge], [
-      hold(50_000n, 'PENDING', earlier),
+      hold(50_000n, 'PENDING'),
+      hold(50_000n, 'PROCESSING', dayAgo),
       hold(50_000n, 'FAILED'),
       hold(50_000n, 'EXPIRED'),
       hold(50_000n, 'COMPLETED'),
@@ -35,7 +36,7 @@ describe('computePosition (holds / payable)', () => {
   });
 
   it('payable never goes below zero', () => {
-    const p = computePosition(100n, [{ type: 'CHARGE', amount: 100n }], [hold(100n, 'PENDING'), hold(100n, 'PENDING')], now);
+    const p = computePosition(100n, [{ type: 'CHARGE', amount: 100n }], [hold(100n, 'PROCESSING'), hold(100n, 'PROCESSING')], now);
     expect(p.payable).toBe(0n);
   });
 

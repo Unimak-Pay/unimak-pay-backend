@@ -14,6 +14,7 @@ export const PAYMENT_COMPLETED_EVENT = 'payment.processing_completed';
 
 /** Events we subscribe to (see scripts: pnpm monime:register-webhook). */
 export const MONIME_EVENTS = {
+  paymentProcessingStarted: 'payment.processing_started',
   paymentCompleted: 'payment.processing_completed',
   transferCompleted: 'internal_transfer.completed',
   transferFailed: 'internal_transfer.failed',

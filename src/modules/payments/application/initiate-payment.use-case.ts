@@ -69,7 +69,6 @@ export class InitiatePaymentUseCase {
         if (!o.settlementAccount) {
           throw new DomainError('INVALID_STATE', `Fee type ${o.feeTypeCode} has no Monime financial account yet (run pnpm monime:provision)`);
         }
-        await this.payments.expireDue(now, o.id, tx);
         const ev = await this.evaluator.evaluate(o, input.amount, input.channel, now, tx);
         return this.payments.create(
           {
@@ -85,7 +84,8 @@ export class InitiatePaymentUseCase {
             monimeFee: ev.split.monimeFee,
             platformFee: ev.split.platformFee,
             netAmount: ev.split.netAmount,
-            expiresAt: new Date(now.getTime() + this.config.get('PAYMENT_EXPIRY_MINUTES') * 60_000),
+            // never expires; the cleanup deletes it after this if nobody paid (docs/payment-lifecycle.md)
+            expiresAt: new Date(now.getTime() + this.config.get('PENDING_PAYMENT_RETENTION_DAYS') * 86_400_000),
             payRequestId: input.payRequestId ?? null,
             paidByName: input.paidByName ?? null,
             payingForSelf: input.payingForSelf ?? false,
