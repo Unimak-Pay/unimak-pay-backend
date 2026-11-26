@@ -179,9 +179,10 @@ describe('deans', () => {
     expect(me).toMatchObject({ role: 'DEAN', departmentScoped: true, faculties: ['FAC-NURSING-AHS'], departments: ['CLIN-PSYCH', 'NURSING', 'PUBLIC-HEALTH'] });
     expect(me.permissions).toEqual(['fees.read', 'payers.read', 'payments.read', 'reports.read']);
 
-    const ids = (await dean.get('/v1/admin/payments?limit=200').expect(200)).body.items.map((p: { id: string }) => p.id);
-    expect(ids).toContain(nurPayment);
-    expect(ids).not.toContain(csPayment);
+    // by payer, so other files' payments in the shared database can't push these off the page
+    const ids = (ref: string) => dean.get(`/v1/admin/payments?payerRef=${ref}&limit=200`).expect(200).then((r) => r.body.items.map((p: { id: string }) => p.id));
+    expect(await ids('UNI-2026-0092')).toContain(nurPayment);
+    expect(await ids('UNI-2026-0091')).toEqual([]);
     await dean.get(`/v1/admin/payments/${csPayment}`).expect(404);
     const report = (await dean.get('/v1/admin/reports/summary').expect(200)).body;
     expect(report).toMatchObject({ commission: null, payouts: null, filters: { departments: ['CLIN-PSYCH', 'NURSING', 'PUBLIC-HEALTH'] } });
@@ -204,9 +205,9 @@ describe('deans', () => {
     expect(nur.map((p: { id: string }) => p.id)).toContain(nurPayment);
     expect(nur.every((p: { payer: { department: string } }) => p.payer.department === 'NURSING')).toBe(true);
     expect(nur[0].payer).toMatchObject({ department: 'NURSING', departmentName: 'Nursing', facultyCode: 'FAC-NURSING-AHS', facultyName: 'Faculty of Nursing and Allied Health Sciences' });
-    const fac = (await s.get('/v1/admin/payments?faculty=FAC-MASSCOM-CS&limit=200').expect(200)).body.items.map((p: { id: string }) => p.id);
-    expect(fac).toContain(csPayment);
-    expect(fac).not.toContain(nurPayment);
+    const fac = (ref: string) => s.get(`/v1/admin/payments?faculty=FAC-MASSCOM-CS&payerRef=${ref}&limit=200`).expect(200).then((r) => r.body.items.map((p: { id: string }) => p.id));
+    expect(await fac('UNI-2026-0091')).toContain(csPayment);
+    expect(await fac('UNI-2026-0092')).toEqual([]);
 
     const csv = (await s.get('/v1/admin/payments/export.csv?faculty=FAC-NURSING-AHS').expect(200)).text;
     const [header, ...lines] = csv.replace(/^﻿/, '').trim().split('\r\n');
