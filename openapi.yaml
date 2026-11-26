@@ -2988,7 +2988,7 @@ components:
         sentAt: { type: [ string, "null" ], format: date-time }
     Payment:
       type: object
-      required: [ id, obligationId, amount, channel, clientId, idempotencyKey, paymentRef, payerPhone, phoneAuthorized, collectionMethod, status, monimeRef, ussdCode, monimePaymentId, monimeOrderNumber, pricingConfigId, monimeFee, platformFee, netAmount, expiresAt, completedAt, failureReason, createdAt, updatedAt ]
+      required: [ id, obligationId, amount, channel, clientId, idempotencyKey, paymentRef, payerPhone, phoneAuthorized, collectionMethod, status, monimeRef, ussdCode, monimePaymentId, monimeOrderNumber, pricingConfigId, monimeFee, platformFee, netAmount, expiresAt, completedAt, failureReason, createdAt, updatedAt, payRequestId, paidByName, payingForSelf, monimeChannelType ]
       properties:
         id: { type: string, format: uuid }
         obligationId: { type: string, format: uuid }
@@ -3014,6 +3014,10 @@ components:
         failureReason: { type: [ string, "null" ] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+        payRequestId: { description: "the pay request this payment was made through (dot: payRequestCode); counts towards it only once COMPLETED", type: [ string, "null" ], format: uuid }
+        paidByName: { description: "first name the paying person gave in the dot (display only, never trusted)", type: [ string, "null" ] }
+        payingForSelf: { description: the dot said the student saved on that phone is paying for themselves (display only), type: boolean }
+        monimeChannelType: { description: "Monime's Payment channel.type from the completed payment: bank | card | momo | wallet", type: [ string, "null" ] }
     Payout:
       type: object
       description: Withdrawal from one of our Monime accounts to a bank (or momo) account.

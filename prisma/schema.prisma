@@ -77,13 +77,13 @@ enum OutboxStatus {
 // ───────────────────────────── Catalog ─────────────────────────────
 
 model FeeType {
-  id                String     @id @default(uuid()) @db.Uuid
+  id         String     @id @default(uuid()) @db.Uuid
   /// APP, MATRIC, TUITION, DEPT, GRAD or a custom code
-  code              String     @unique
-  name              String
-  payerKind         PayerKind
-  recurrence        Recurrence
-  createdAt         DateTime   @default(now())
+  code       String     @unique
+  name       String
+  payerKind  PayerKind
+  recurrence Recurrence
+  createdAt  DateTime   @default(now())
 
   fees    Fee[]
   /// Monime financial account collections for this fee type settle into
@@ -186,7 +186,7 @@ enum EnrolmentStatus {
 }
 
 model Payer {
-  id              String     @id @default(uuid()) @db.Uuid
+  id              String           @id @default(uuid()) @db.Uuid
   kind            PayerKind
   /// applicationRef for applicants, studentId for students
   ref             String
@@ -208,8 +208,10 @@ model Payer {
   /// when we last got this record from the portal (event or lookup)
   snapshotAt      DateTime
 
-  obligations Obligation[]
-  receipts    Receipt[]
+  obligations     Obligation[]
+  receipts        Receipt[]
+  payRequests     PayRequest[]
+  clearancePasses ClearancePass[]
 
   @@unique([kind, ref])
   /// analytics grid and payer list filters
@@ -217,21 +219,22 @@ model Payer {
 }
 
 model Obligation {
-  id        String           @id @default(uuid()) @db.Uuid
-  payerId   String           @db.Uuid
-  feeId     String           @db.Uuid
+  id         String           @id @default(uuid()) @db.Uuid
+  payerId    String           @db.Uuid
+  feeId      String           @db.Uuid
   /// copied from the best-matching rate rule at creation
-  amount    BigInt
-  rateRuleId String?         @db.Uuid
-  status    ObligationStatus @default(OPEN)
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  amount     BigInt
+  rateRuleId String?          @db.Uuid
+  status     ObligationStatus @default(OPEN)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
 
-  payer    Payer         @relation(fields: [payerId], references: [id])
-  fee      Fee           @relation(fields: [feeId], references: [id])
-  entries  LedgerEntry[]
-  payments Payment[]
-  receipts Receipt[]
+  payer       Payer         @relation(fields: [payerId], references: [id])
+  fee         Fee           @relation(fields: [feeId], references: [id])
+  entries     LedgerEntry[]
+  payments    Payment[]
+  receipts    Receipt[]
+  payRequests PayRequest[]
 
   @@unique([payerId, feeId])
 }
@@ -258,46 +261,57 @@ model LedgerEntry {
 // ───────────────────────────── Payments ─────────────────────────────
 
 model Payment {
-  id              String        @id @default(uuid()) @db.Uuid
-  obligationId    String        @db.Uuid
-  amount          BigInt
-  channel         Channel
+  id                String           @id @default(uuid()) @db.Uuid
+  obligationId      String           @db.Uuid
+  amount            BigInt
+  channel           Channel
   /// channel API client that created it (idempotency scope)
-  clientId        String
-  idempotencyKey  String
+  clientId          String
+  idempotencyKey    String
   /// short ref shown to the payer (8 digits) for status checks
-  paymentRef      String        @unique
+  paymentRef        String           @unique
   /// number that actually paid: full when known (verified or from metadata),
   /// else Monime's masked one (+23276****56); null until known
-  payerPhone      String?
+  payerPhone        String?
   /// payment code restricted to payerPhone
-  phoneAuthorized Boolean       @default(true)
-  collectionMethod CollectionMethod @default(PAYMENT_CODE)
-  status          PaymentStatus @default(INITIATED)
+  phoneAuthorized   Boolean          @default(true)
+  collectionMethod  CollectionMethod @default(PAYMENT_CODE)
+  status            PaymentStatus    @default(INITIATED)
   /// Monime payment code id (pmc-…) created at initiation
-  monimeRef       String?       @unique
+  monimeRef         String?          @unique
   /// USSD string the payer dials, e.g. *715*1*7344331308#
-  ussdCode        String?
+  ussdCode          String?
   /// Monime Payment id (spm-…) from payment.processing_completed
-  monimePaymentId String?       @unique
+  monimePaymentId   String?          @unique
   /// Monime order number from the completed payment (sent to the payer by Monime SMS)
   monimeOrderNumber String?
-  pricingConfigId String        @db.Uuid
-  monimeFee       BigInt
-  platformFee     BigInt
-  netAmount       BigInt
-  expiresAt       DateTime
-  completedAt     DateTime?
-  failureReason   String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  pricingConfigId   String           @db.Uuid
+  monimeFee         BigInt
+  platformFee       BigInt
+  netAmount         BigInt
+  expiresAt         DateTime
+  completedAt       DateTime?
+  failureReason     String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  /// the pay request this payment was made through (dot: payRequestCode); counts towards it only once COMPLETED
+  payRequestId      String? @db.Uuid
+  /// first name the paying person gave in the dot (display only, never trusted)
+  paidByName        String?
+  /// the dot said the student saved on that phone is paying for themselves (display only)
+  payingForSelf     Boolean @default(false)
+  /// Monime's Payment channel.type from the completed payment: bank | card | momo | wallet
+  monimeChannelType String?
 
   obligation    Obligation    @relation(fields: [obligationId], references: [id])
   pricingConfig PricingConfig @relation(fields: [pricingConfigId], references: [id])
+  payRequest    PayRequest?   @relation(fields: [payRequestId], references: [id])
   ledgerEntry   LedgerEntry?
   receipt       Receipt?
 
   @@unique([clientId, idempotencyKey])
+  @@index([payRequestId])
   @@index([obligationId, status])
   @@index([status, expiresAt])
   @@index([monimeOrderNumber])
@@ -590,24 +604,24 @@ enum ReconciliationItemStatus {
 }
 
 model ReconciliationItem {
-  id              String                   @id @default(uuid()) @db.Uuid
-  runId           String                   @db.Uuid
+  id                 String                   @id @default(uuid()) @db.Uuid
+  runId              String                   @db.Uuid
   /// MISSED_WEBHOOK_SETTLED | UNMATCHED_MONIME_PAYMENT | MISSING_AT_MONIME |
   /// AMOUNT_MISMATCH | MONIME_FEE_MISMATCH | COMMISSION_MISSING |
   /// COMMISSION_NOT_COMPLETED | COMMISSION_AMOUNT_MISMATCH | SCAN_TRUNCATED
-  kind            String
-  status          ReconciliationItemStatus @default(OPEN)
-  paymentId       String?                  @db.Uuid
-  monimePaymentId String?
-  transferId      String?                  @db.Uuid
+  kind               String
+  status             ReconciliationItemStatus @default(OPEN)
+  paymentId          String?                  @db.Uuid
+  monimePaymentId    String?
+  transferId         String?                  @db.Uuid
   financialAccountId String?
-  expected        Json?
-  actual          Json?
-  note            String
-  resolvedAt      DateTime?
-  resolvedBy      String?
-  resolution      String?
-  createdAt       DateTime                 @default(now())
+  expected           Json?
+  actual             Json?
+  note               String
+  resolvedAt         DateTime?
+  resolvedBy         String?
+  resolution         String?
+  createdAt          DateTime                 @default(now())
 
   run ReconciliationRun @relation(fields: [runId], references: [id])
 
@@ -667,4 +681,64 @@ model PortalEvent {
 
   @@index([receivedAt])
   @@index([ref])
+}
+
+// ───────────────────────────── Dot extras ─────────────────────────────
+
+/// A student asking someone else to pay (docs/dot-extras.md). Status is derived when read
+/// from its COMPLETED payments, the obligation and expiresAt; only a cancellation is stored.
+model PayRequest {
+  id             String    @id @default(uuid()) @db.Uuid
+  /// 7 characters, no 0/O/1/I/L; the secret in the share link
+  code           String    @unique
+  payerId        String    @db.Uuid
+  obligationId   String    @db.Uuid
+  /// minor units; null = "whatever you can"
+  amount         BigInt?
+  message        String
+  recipientName  String?
+  cancelledAt    DateTime?
+  /// first time the request was read by its code
+  openedAt       DateTime?
+  idempotencyKey String
+  /// sha256 of the create body: the same key with a different body is a conflict
+  requestHash    String
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+
+  payer      Payer      @relation(fields: [payerId], references: [id])
+  obligation Obligation @relation(fields: [obligationId], references: [id])
+  payments   Payment[]
+
+  @@unique([payerId, idempotencyKey])
+  @@index([payerId, createdAt])
+}
+
+/// Who is cleared to sit exams: one editable row (id "current"), set by the finance office.
+/// A student is cleared when every obligation of feeTypeCodes in `period`, and (if
+/// includeOverdue) every obligation past its fee's due date, has a zero balance.
+model ClearancePolicy {
+  id             String   @id @default("current")
+  examName       String
+  period         String
+  feeTypeCodes   String[]
+  includeOverdue Boolean  @default(true)
+  /// true until the finance office sets the real rule
+  placeholder    Boolean  @default(true)
+  updatedBy      String
+  updatedAt      DateTime @updatedAt
+}
+
+/// A student's exam pass for a period. The public page /c/{code} re-checks clearance live.
+model ClearancePass {
+  id       String   @id @default(uuid()) @db.Uuid
+  /// 8 characters, no 0/O/1/I/L
+  code     String   @unique
+  payerId  String   @db.Uuid
+  period   String
+  issuedAt DateTime @default(now())
+
+  payer Payer @relation(fields: [payerId], references: [id])
+
+  @@unique([payerId, period])
 }

@@ -205,6 +205,25 @@ export class EnvSchema {
   @Max(10_000)
   DOT_RATE_LIMIT_PER_MINUTE = 60;
 
+  /** The dot's Dash link; pay-request share links are `${DOT_LINK}/sponsor?…`. */
+  @IsUrl({ require_tld: false })
+  DOT_LINK = 'https://dashit.to/d/k6X5mJ6TFSnLUm8KwUjqWu4Mcf5';
+
+  /**
+   * Require X-User-Alias on the dot's payer routes. Off while published dots
+   * (0.2.2 and earlier) don't send it; a missing header then keeps today's behaviour.
+   */
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  DOT_ALIAS_REQUIRED = false;
+
+  /** Failed X-User-Alias matches allowed per hour, per client IP and per payer ID. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1_000)
+  DOT_ALIAS_FAILURES_PER_HOUR = 10;
+
   /** Try dispatching outbox messages right after commit (disable in some tests). */
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
