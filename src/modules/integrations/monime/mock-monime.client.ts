@@ -220,6 +220,7 @@ export class MockMonimeClient implements MonimeClient {
       fees: BigInt((d['fees'] as string | undefined) ?? '0'),
       payerPhone: (d['payerPhone'] as string | null) ?? null,
       orderNumber: (d['orderNumber'] as string | null) ?? null,
+      channelType: (d['channelType'] as string | null) ?? null,
       createTime: new Date((d['createTime'] as string | undefined) ?? r.createdAt),
       updateTime: null,
     };

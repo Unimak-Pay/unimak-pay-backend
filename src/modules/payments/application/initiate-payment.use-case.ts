@@ -27,6 +27,12 @@ export interface InitiatePaymentInput {
    * id); likewise we only record the PENDING payment.
    */
   collection?: CollectionMethod;
+  /** dot: the pay request this payment goes towards (already checked by the caller) */
+  payRequestId?: string | null;
+  /** dot: first name the paying person gave; display only */
+  paidByName?: string | null;
+  /** dot: the payer is paying for themselves; display only */
+  payingForSelf?: boolean;
 }
 
 /**
@@ -80,6 +86,9 @@ export class InitiatePaymentUseCase {
             platformFee: ev.split.platformFee,
             netAmount: ev.split.netAmount,
             expiresAt: new Date(now.getTime() + this.config.get('PAYMENT_EXPIRY_MINUTES') * 60_000),
+            payRequestId: input.payRequestId ?? null,
+            paidByName: input.paidByName ?? null,
+            payingForSelf: input.payingForSelf ?? false,
           },
           tx,
         );
@@ -99,7 +108,8 @@ export class InitiatePaymentUseCase {
   private async replay(p: PaymentRecord, input: InitiatePaymentInput, now: Date): Promise<PaymentRecord> {
     if (
       p.obligationId !== input.obligationId || p.amount !== input.amount || p.channel !== input.channel ||
-      p.collectionMethod !== (input.collection ?? 'PAYMENT_CODE')
+      p.collectionMethod !== (input.collection ?? 'PAYMENT_CODE') ||
+      p.payRequestId !== (input.payRequestId ?? null)
     ) {
       throw new DomainError('IDEMPOTENCY_CONFLICT', 'Idempotency key was used for a different payment');
     }

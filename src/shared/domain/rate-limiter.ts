@@ -24,6 +24,12 @@ export class FixedWindowLimiter {
     return w.count <= this.limit;
   }
 
+  /** True when the key has used up the current window (does not count a hit). */
+  exhausted(key: string, now = Date.now()): boolean {
+    const w = this.windows.get(key);
+    return !!w && now - w.start < this.windowMs && w.count >= this.limit;
+  }
+
   /** Seconds until the key's window resets. */
   retryAfter(key: string, now = Date.now()): number {
     const w = this.windows.get(key);

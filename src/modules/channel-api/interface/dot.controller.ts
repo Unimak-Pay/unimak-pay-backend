@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { DomainError } from '../../../shared/domain/errors';
 import { AcademicsService } from '../../academics/application/academics.service';
 import type { PayerKind } from '../../catalog/domain/payer-profile';
@@ -8,8 +9,12 @@ import { InitiatePaymentUseCase } from '../../payments/application/initiate-paym
 import { PAYMENT_REPOSITORY, type PaymentRepository } from '../../payments/application/payment.repository';
 import { PaymentStatusQuery } from '../../payments/application/payment-status.query';
 import { QuotePaymentUseCase } from '../../payments/application/quote-payment.use-case';
-import { DotRateLimitGuard } from './dot-rate-limit.guard';
-import { DotAmountDto, IDEMPOTENCY_KEY } from './dto';
+import { shortName } from '../../../shared/domain/mask';
+import { PayRequestsService } from '../../dot-extras/application/pay-requests.service';
+import type { Payer } from '../../payers/domain/payer';
+import { type AliasRequest, DotAliasCheck } from '../application/dot-alias-check';
+import { clientIp, DotRateLimitGuard } from './dot-rate-limit.guard';
+import { CreatePayRequestDto, DotAmountDto, DotPaymentDto, IDEMPOTENCY_KEY } from './dto';
 import { PayerKindPipe, RefPipe } from './payer-kind.pipe';
 import { presentDotOrder, presentDotPayer, presentObligation, presentPayment, presentPaymentStatus } from './presenters';
 
@@ -33,16 +38,33 @@ export class DotController {
     private readonly initiate: InitiatePaymentUseCase,
     private readonly paymentStatus: PaymentStatusQuery,
     @Inject(PAYMENT_REPOSITORY) private readonly payments: PaymentRepository,
+    private readonly alias: DotAliasCheck,
+    private readonly payRequests: PayRequestsService,
   ) {}
 
+  /**
+   * With a matching X-User-Alias (or none, from dots before 0.2.3): the full record. With
+   * another number (a sponsor, "pay for others"): only what's needed to pay.
+   */
   @Get('payers/:kind/:ref')
-  async getPayer(@Param('kind', PayerKindPipe) kind: PayerKind, @Param('ref', RefPipe) ref: string) {
+  async getPayer(@Param('kind', PayerKindPipe) kind: PayerKind, @Param('ref', RefPipe) ref: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const { payer, stale } = await this.lookup.execute(kind, ref);
-    const [views, names] = await Promise.all([this.obligations.forPayer(payer), this.academics.names([payer.department])]);
+    const views = await this.obligations.forPayer(payer);
+    if (this.alias.forLookup(aliasRequest(req, res), payer) === 'SHORT') {
+      return { payer: { kind: payer.kind.toLowerCase(), ref: payer.ref, shortName: shortName(payer.fullName), limited: true, stale }, obligations: views.map(presentObligation) };
+    }
+    const names = await this.academics.names([payer.department]);
     return {
       payer: presentDotPayer(payer, stale, payer.department ? names.get(payer.department) : undefined),
       obligations: views.map(presentObligation),
     };
+  }
+
+  /** The payer, once X-User-Alias matches (history, requests, clearance). */
+  private async matchedPayer(kind: PayerKind, ref: string, req: Request, res: Response): Promise<Payer> {
+    const { payer } = await this.lookup.execute(kind, ref);
+    this.alias.require(aliasRequest(req, res), payer);
+    return payer;
   }
 
   @Post('quotes')
@@ -58,11 +80,18 @@ export class DotController {
    */
   @Post('payments')
   @HttpCode(201)
-  async postPayment(@Headers('idempotency-key') key: string | undefined, @Body() dto: DotAmountDto) {
+  async postPayment(@Headers('idempotency-key') key: string | undefined, @Body() dto: DotPaymentDto) {
     if (!key || !IDEMPOTENCY_KEY.test(key)) {
       throw new DomainError('VALIDATION', 'Idempotency-Key header must be 8-100 letters, digits or _.:-');
     }
+    // optional (dot 0.2.3+); without them everything works as before
+    const replay = dto.payRequestCode ? !!(await this.payments.byIdempotencyKey(DOT_CLIENT_ID, key)) : false;
+    const payRequestId = dto.payRequestCode ? await this.payRequests.forPayment(dto.payRequestCode, dto.obligationId, new Date(), { replay }) : null;
+    const paidByName = dto.paidByName ? firstNameOnly(dto.paidByName) : null;
     const p = await this.initiate.execute({
+      payRequestId,
+      paidByName,
+      payingForSelf: dto.payingForSelf ?? false,
       clientId: DOT_CLIENT_ID,
       obligationId: dto.obligationId,
       amount: BigInt(dto.amount),
@@ -80,7 +109,7 @@ export class DotController {
       status: v.status,
       amount: v.amount,
       expiresAt: v.expiresAt,
-      order: presentDotOrder(p, o),
+      order: presentDotOrder(p, o, dto.payRequestCode ? dto.payRequestCode.toUpperCase() : undefined),
       financialAccountId: o.settlementAccount!,
     };
   }
@@ -92,4 +121,44 @@ export class DotController {
     if (!v) throw new DomainError('NOT_FOUND', 'Payment not found');
     return presentPaymentStatus(v);
   }
+
+  // ── Pay requests (docs/dot-extras.md §3) ───────────────────────────────────
+
+  /** A student asks someone to pay. Idempotent on Idempotency-Key, like payments. */
+  @Post('pay-requests')
+  @HttpCode(201)
+  async createPayRequest(@Headers('idempotency-key') key: string | undefined, @Body() dto: CreatePayRequestDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    if (!key || !IDEMPOTENCY_KEY.test(key)) {
+      throw new DomainError('VALIDATION', 'Idempotency-Key header must be 8-100 letters, digits or _.:-');
+    }
+    const payer = await this.matchedPayer(new PayerKindPipe().transform(dto.kind), dto.ref, req, res);
+    return this.payRequests.create(payer, {
+      obligationId: dto.obligationId,
+      amount: dto.amount ? BigInt(dto.amount) : null,
+      message: dto.message,
+      recipientName: dto.recipientName ?? null,
+      idempotencyKey: key,
+    });
+  }
+
+  /** The sponsor's page. No alias match needed: the code is the secret. */
+  @Get('pay-requests/:code')
+  getPayRequest(@Param('code') code: string) {
+    return this.payRequests.byCode(code.slice(0, 20));
+  }
+
+  @Get('payers/:kind/:ref/pay-requests')
+  async listPayRequests(@Param('kind', PayerKindPipe) kind: PayerKind, @Param('ref', RefPipe) ref: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    return this.payRequests.listFor(await this.matchedPayer(kind, ref, req, res));
+  }
+}
+
+function aliasRequest(req: Request, res: Response): AliasRequest {
+  return { alias: req.header('x-user-alias') ?? undefined, ip: clientIp(req), res };
+}
+
+/** "Fatmata Sesay" → "Fatmata": the dot is asked for a first name; keep only that. */
+function firstNameOnly(s: string): string | null {
+  const f = s.replace(/[\u0000-\u001F\u007F]/g, ' ').trim().split(/\s+/)[0] ?? '';
+  return f ? f.slice(0, 40) : null;
 }

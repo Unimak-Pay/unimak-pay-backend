@@ -65,7 +65,7 @@ describe('Monime webhook parsing', () => {
       monimePaymentId: 'spm-1', financialAccountId: 'fa-unimak-application', currency: 'SLE', amount: 15_000n, fees: 150n,
       reference: '11111111-2222-3333-4444-555555555555',
       metadata: { paymentId: 'from-payment', source: 'ussd', n: '3' },
-      ownerId: 'pmc-1', ownerType: 'payment_code', payerPhone: '+23276****56', orderNumber: '3BMRXXXQXJW3',
+      ownerId: 'pmc-1', ownerType: 'payment_code', payerPhone: '+23276****56', orderNumber: '3BMRXXXQXJW3', channelType: 'momo',
     });
   });
 

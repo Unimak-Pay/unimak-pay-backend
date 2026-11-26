@@ -52,6 +52,8 @@ export interface MonimePaymentRecord {
   /** channel number as Monime reports it (usually masked) */
   payerPhone: string | null;
   orderNumber: string | null;
+  /** channel.type: bank | card | momo | wallet */
+  channelType: string | null;
   createTime: Date;
   updateTime: Date | null;
 }

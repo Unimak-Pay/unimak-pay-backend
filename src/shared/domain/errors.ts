@@ -19,7 +19,9 @@ export type DomainErrorCode =
   | 'UPSTREAM_UNAVAILABLE'
   | 'UNAUTHENTICATED'
   | 'MFA_REQUIRED'
-  | 'RATE_LIMITED';
+  | 'RATE_LIMITED'
+  | 'ALIAS_MISMATCH'
+  | 'ALIAS_REQUIRED';
 
 export class DomainError extends Error {
   constructor(

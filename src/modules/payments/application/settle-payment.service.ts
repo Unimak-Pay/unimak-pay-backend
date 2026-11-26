@@ -32,6 +32,8 @@ export interface CompletedMonimePayment {
   payerPhone?: string | null;
   /** Monime order number (in Monime's own SMS to the payer) */
   orderNumber?: string | null;
+  /** channel.type: bank | card | momo | wallet */
+  channelType?: string | null;
   occurredAt: Date;
 }
 
@@ -117,6 +119,7 @@ export class SettlePaymentService {
       {
         status: 'COMPLETED', completedAt, monimePaymentId: ev.monimePaymentId, failureReason: null,
         monimeOrderNumber: ev.orderNumber ?? null,
+        monimeChannelType: ev.channelType ?? null,
         payerPhone: resolvePayerPhone({ metadata: ev.metadata, reported: ev.payerPhone, current: p.payerPhone }),
       },
       tx,

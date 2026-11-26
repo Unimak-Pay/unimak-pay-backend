@@ -33,6 +33,14 @@ export interface PaymentRecord {
   expiresAt: Date;
   completedAt: Date | null;
   failureReason: string | null;
+  /** pay request this payment was made through (dot) */
+  payRequestId: string | null;
+  /** first name the paying person gave in the dot (display only) */
+  paidByName: string | null;
+  /** the dot said the payer is paying for themselves (display only) */
+  payingForSelf: boolean;
+  /** Monime channel.type once completed: bank | card | momo | wallet */
+  monimeChannelType: string | null;
   createdAt: Date;
 }
 
@@ -50,6 +58,9 @@ export interface NewPayment {
   platformFee: Minor;
   netAmount: Minor;
   expiresAt: Date;
+  payRequestId?: string | null;
+  paidByName?: string | null;
+  payingForSelf?: boolean;
 }
 
 /** What initiation needs to know about the obligation, read under the row lock. */
@@ -89,7 +100,7 @@ export interface PaymentRepository {
   create(p: NewPayment, db: Db): Promise<PaymentRecord>;
   update(
     id: string,
-    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'ussdCode' | 'monimePaymentId' | 'monimeOrderNumber' | 'payerPhone' | 'completedAt' | 'failureReason'>>,
+    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'ussdCode' | 'monimePaymentId' | 'monimeOrderNumber' | 'monimeChannelType' | 'payerPhone' | 'completedAt' | 'failureReason'>>,
     db?: Db,
   ): Promise<PaymentRecord>;
   /** Marks open payments past expiry as EXPIRED. Returns count. */

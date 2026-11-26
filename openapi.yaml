@@ -265,10 +265,14 @@ paths:
       tags: [Dash dot]
       summary: Look up a payer and what they owe
       description: |
-        Fetches from the university portal (cached) and creates any missing obligations.
-        Returns the full name and academic details; the phone is masked.
+        Reads our store first (the portal for someone new) and creates any missing obligations.
+        - `X-User-Alias` matches the payer's phone, or is missing (dots before 0.2.3, while
+          `DOT_ALIAS_REQUIRED` is off): the full name and academic details (`DotPayer`), phone masked.
+        - Another number (a sponsor paying for someone): only what's needed to pay (`DotPayerShort`:
+          first name and last initial, `limited: true`) with the same obligations. After too many
+          wrong numbers from one IP or for one ID, it answers short without checking.
       security: []
-      parameters: [{ $ref: '#/components/parameters/PayerKind' }, { $ref: '#/components/parameters/PayerRef' }]
+      parameters: [{ $ref: '#/components/parameters/PayerKind' }, { $ref: '#/components/parameters/PayerRef' }, { $ref: '#/components/parameters/UserAlias' }]
       responses:
         '200':
           description: Payer and obligations
@@ -278,7 +282,7 @@ paths:
                 type: object
                 required: [payer, obligations]
                 properties:
-                  payer: { $ref: '#/components/schemas/DotPayer' }
+                  payer: { oneOf: [{ $ref: '#/components/schemas/DotPayer' }, { $ref: '#/components/schemas/DotPayerShort' }] }
                   obligations: { type: array, items: { $ref: '#/components/schemas/Obligation' } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -289,7 +293,9 @@ paths:
       operationId: dotPostQuote
       tags: [Dash dot]
       summary: Validate an amount without creating anything
+      description: Works for anyone (sponsors too); `X-User-Alias` isn't checked.
       security: []
+      parameters: [{ $ref: '#/components/parameters/UserAlias' }]
       requestBody:
         required: true
         content:
@@ -324,9 +330,17 @@ paths:
         to pass unchanged to `dash.payments.request()`. No Monime call is made here.
         Idempotent on the `Idempotency-Key` header: a retry returns the same payment and order
         (409 `IDEMPOTENCY_CONFLICT` if the key was used for a different obligation or amount).
-        Show the payer `paymentRef` for later status checks.
+        Show the payer `paymentRef` for later status checks. Works for anyone (sponsors too);
+        `X-User-Alias` isn't checked.
+
+        Optional (dot 0.2.3+): `payRequestCode` pays through a pay request (it must be open, not
+        expired and for this obligation: 404 / 400 / 409 `INVALID_STATE`; a retry with the same key
+        replays even after the request closed). The payment counts towards the request only once
+        Monime completes it. `paidByName` (first name, display only) and `payingForSelf` feed
+        `paidBy` in history and receipts.
       security: []
       parameters:
+        - { $ref: '#/components/parameters/UserAlias' }
         - name: Idempotency-Key
           in: header
           required: true
@@ -336,7 +350,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/DotAmountRequest' }
+            schema: { $ref: '#/components/schemas/DotPaymentRequest' }
       responses:
         '201':
           description: Payment started
@@ -367,9 +381,91 @@ paths:
       description: '`ref` is our 8-digit payment ref or Monime''s order number. Payer details are masked.'
       security: []
       parameters:
+        - { $ref: '#/components/parameters/UserAlias' }
         - { name: ref, in: path, required: true, schema: { type: string, examples: ['15540719', '3BMRXXXQXJW3'] } }
       responses:
         '200': { description: Status, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentStatusView' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/dot/pay-requests:
+    post:
+      operationId: dotCreatePayRequest
+      tags: [Dash dot]
+      summary: Ask someone to pay (create a pay request)
+      description: |
+        `X-User-Alias` must match the student's phone (403 `ALIAS_REQUIRED` / `ALIAS_MISMATCH`).
+        Idempotent on `Idempotency-Key` like payments (same key, different body: 409
+        `IDEMPOTENCY_CONFLICT`). `amount` above the fee's payable: 422 `AMOUNT_EXCEEDS_PAYABLE`; a
+        paid fee: 409 `OBLIGATION_SETTLED`; at most 20 open requests per payer (400 `VALIDATION`).
+        Expires after 30 days, or on the fee's due date if sooner, never less than 3 days.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/UserAlias'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,100}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, ref, obligationId, message]
+              properties:
+                kind: { type: string, enum: [student, applicant] }
+                ref: { type: string }
+                obligationId: { type: string, format: uuid }
+                amount: { oneOf: [{ $ref: '#/components/schemas/MinorAmount' }, { type: 'null' }], description: 'null = "whatever you can"' }
+                message: { type: string, minLength: 1, maxLength: 280, description: 'Trimmed; 1-280 characters after trimming.' }
+                recipientName: { type: [string, 'null'], maxLength: 60 }
+      responses:
+        '201': { description: The request (or the existing one on a retry), content: { application/json: { schema: { $ref: '#/components/schemas/PayRequest' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/AliasForbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/dot/pay-requests/{code}:
+    get:
+      operationId: dotGetPayRequest
+      tags: [Dash dot]
+      summary: A pay request, for the sponsor's page
+      description: |
+        No alias match needed: the code is the secret. The first call records `openedAt`.
+        `requester` is only a first name and programme.
+      security: []
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, example: K7PQ2XA } }
+        - $ref: '#/components/parameters/UserAlias'
+      responses:
+        '200': { description: The request, content: { application/json: { schema: { $ref: '#/components/schemas/PayRequest' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/dot/payers/{kind}/{ref}/pay-requests:
+    get:
+      operationId: dotListPayRequests
+      tags: [Dash dot]
+      summary: A payer's pay requests, newest first
+      description: '`X-User-Alias` must match the payer''s phone.'
+      security: []
+      parameters: [{ $ref: '#/components/parameters/PayerKind' }, { $ref: '#/components/parameters/PayerRef' }, { $ref: '#/components/parameters/UserAlias' }]
+      responses:
+        '200':
+          description: Requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests: { type: array, items: { $ref: '#/components/schemas/PayRequest' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/AliasForbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
@@ -2002,6 +2098,17 @@ components:
     DepartmentFilter: { name: department, in: query, schema: { type: string, maxLength: 40 }, example: NURSING, description: Department code. }
     FacultyFilter: { name: faculty, in: query, schema: { type: string, maxLength: 40 }, example: FAC-NURSING-AHS, description: 'Faculty code: its departments as they are now.' }
     PayerKind: { name: kind, in: path, required: true, schema: { type: string, enum: [applicant, student] } }
+    UserAlias:
+      name: X-User-Alias
+      in: header
+      required: false
+      description: |
+        Dot 0.2.3+: the Dash account's phone number (or email when it has none), from Dash sign-in,
+        e.g. `+232 76 123456`. Phones are compared on their national number (`076123456`,
+        `23276123456` and `+232 76 123456` are the same); emails never match (we only hold phones).
+        A check, not a login: the dot sets it itself. Failed matches are limited per IP and per ID;
+        it is never returned and only logged masked.
+      schema: { type: string, maxLength: 254 }
     PayerRef: { name: ref, in: path, required: true, schema: { type: string }, examples: { student: { value: UNI-2025-0002 }, applicant: { value: APP-2026-0001 } } }
     AnalyticsFeeId: { name: feeId, in: query, schema: { type: string, format: uuid }, description: One fee. }
     AnalyticsFeeType: { name: feeType, in: query, schema: { type: string, maxLength: 40 }, example: TUITION, description: Fee type code. }
@@ -2043,6 +2150,14 @@ components:
     Forbidden: { description: 'Missing permission, not an admin, or 2FA required', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     NotFound: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     Conflict: { description: Conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    AliasForbidden:
+      description: |
+        `ALIAS_REQUIRED` (no `X-User-Alias`) or `ALIAS_MISMATCH` (another number). `message` is written
+        for the student; show it as it is.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: ALIAS_MISMATCH, message: "This ID isn't linked to the Dash number you're using. Use the number the university has for you, or contact the finance office.", details: null } }
     Unprocessable: { description: Amount or rule not acceptable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     RateLimited:
       description: Too many requests from this IP; retry after `Retry-After` seconds
@@ -2079,6 +2194,64 @@ components:
         intake: { type: string, example: 2026-SEP }
         applicantStatus: { type: [string, 'null'], description: 'Applicants only (e.g. APPLIED, ADMITTED)' }
         stale: { type: boolean, description: 'true when the portal was down and this is the last snapshot' }
+    DotPayerShort:
+      type: object
+      description: 'The lookup for someone whose X-User-Alias does not match (a sponsor): enough to pay, nothing more.'
+      required: [kind, ref, shortName, limited, stale]
+      properties:
+        kind: { type: string, enum: [applicant, student] }
+        ref: { type: string }
+        shortName: { type: string, example: Abdul K., description: First name and last initial }
+        limited: { const: true }
+        stale: { type: boolean }
+    DotPaymentRequest:
+      type: object
+      required: [obligationId, amount]
+      properties:
+        obligationId: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/MinorAmount' }
+        payRequestCode: { type: string, maxLength: 20, description: 'Pay through this pay request (dot 0.2.3+).' }
+        paidByName: { type: string, maxLength: 40, description: "Payer's first name, display only; anything after the first word is dropped." }
+        payingForSelf: { type: boolean, description: 'true when the student saved on that phone is paying; display only. Default false.' }
+    PayRequest:
+      type: object
+      required: [code, shareUrl, obligationId, feeName, amount, paid, status, message, requester, recipientName, contributions, openedAt, createdAt, expiresAt]
+      properties:
+        code: { type: string, example: K7PQ2XA }
+        shareUrl: { type: string, format: uri, description: '`${DOT_LINK}/sponsor?request=&kind=&ref=&fee=&amount=` (amount empty when null)' }
+        obligationId: { type: string, format: uuid }
+        feeName: { type: string }
+        amount: { oneOf: [{ $ref: '#/components/schemas/Money' }, { type: 'null' }] }
+        paid: { $ref: '#/components/schemas/Money' }
+        status:
+          type: string
+          enum: [OPEN, PARTLY_PAID, PAID, CANCELLED, EXPIRED]
+          description: |
+            From its COMPLETED payments only. PAID: reached `amount`, or the fee was paid off with its
+            help; a fee paid off without it reads EXPIRED.
+        message: { type: string }
+        requester:
+          type: object
+          required: [kind, ref, firstName, programLine]
+          properties:
+            kind: { type: string, enum: [applicant, student] }
+            ref: { type: string }
+            firstName: { type: string }
+            programLine: { type: string, example: 'BSC-CS · Level 1' }
+        recipientName: { type: [string, 'null'] }
+        contributions:
+          type: array
+          items:
+            type: object
+            required: [paymentRef, name, amount, paidAt]
+            properties:
+              paymentRef: { $ref: '#/components/schemas/PaymentRef' }
+              name: { type: [string, 'null'] }
+              amount: { $ref: '#/components/schemas/Money' }
+              paidAt: { type: string, format: date-time }
+        openedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
     DotAmountRequest:
       type: object
       required: [obligationId, amount]
@@ -2467,7 +2640,7 @@ components:
           properties:
             code: { type: string, example: OBLIGATION_SETTLED }
             message: { type: string }
-            details: { type: object, additionalProperties: true }
+            details: { type: [object, 'null'], additionalProperties: true }
     ValidationError:
       type: object
       properties:

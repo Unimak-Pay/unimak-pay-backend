@@ -140,7 +140,7 @@ describe('HttpMonimeClient payments listing', () => {
     expect(page.next).toBe('cur-2');
     expect(page.items[0]).toEqual({
       id: 'pay-1', status: 'completed', currency: 'SLE', amount: 15000n, financialAccountId: 'fac-app', reference: 'p-1',
-      metadata: { a: 'b', payment_id: 'p-1' }, ownerId: 'pmc-1', fees: 150n, payerPhone: '+23276123456', orderNumber: 'ORD123456',
+      metadata: { a: 'b', payment_id: 'p-1' }, ownerId: 'pmc-1', fees: 150n, payerPhone: '+23276123456', orderNumber: 'ORD123456', channelType: 'momo',
       createTime: new Date('2026-11-17T10:00:00Z'), updateTime: null,
     });
   });

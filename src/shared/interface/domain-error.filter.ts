@@ -20,6 +20,8 @@ const STATUS: Record<DomainErrorCode, HttpStatus> = {
   UNAUTHENTICATED: HttpStatus.UNAUTHORIZED,
   MFA_REQUIRED: HttpStatus.FORBIDDEN,
   RATE_LIMITED: HttpStatus.TOO_MANY_REQUESTS,
+  ALIAS_MISMATCH: HttpStatus.FORBIDDEN,
+  ALIAS_REQUIRED: HttpStatus.FORBIDDEN,
 };
 
 /** DomainError → { error: { code, message, details } } with a mapped status. */

@@ -45,6 +45,8 @@ export interface ParsedCompletedPayment {
   payerPhone: string | null;
   /** Monime order number (the one in Monime's SMS to the payer) */
   orderNumber: string | null;
+  /** channel.type: bank | card | momo | wallet (Payment object, caph.2025-08-23) */
+  channelType: string | null;
 }
 
 export class InvalidWebhookPayloadError extends Error {
@@ -92,6 +94,7 @@ export function parseCompletedPayment(env: MonimeWebhookEnvelope): ParsedComplet
     ownerType: asString(owner['type']),
     payerPhone: reportedMsisdn(asString(optionalRecord(data['channel'])['phoneNumber'])),
     orderNumber: asString(data['orderNumber']),
+    channelType: asString(optionalRecord(data['channel'])['type']),
   };
 }
 

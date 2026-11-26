@@ -357,6 +357,7 @@ function toPaymentRecord(p: WirePayment): MonimePaymentRecord {
     fees: (p.fees ?? []).filter((f) => f.amount?.currency === p.amount.currency).reduce((s, f) => s + BigInt(f.amount.value), 0n),
     payerPhone: reportedMsisdn(p.channel?.phoneNumber),
     orderNumber: p.orderNumber ?? null,
+    channelType: p.channel?.type ?? null,
     createTime: new Date(p.createTime),
     updateTime: p.updateTime ? new Date(p.updateTime) : null,
   };

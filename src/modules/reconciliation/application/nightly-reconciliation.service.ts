@@ -125,7 +125,7 @@ export class NightlyReconciliationService {
     const result = await this.prisma.$transaction(
       (tx) => this.settle.applyCompleted(tx, {
         monimePaymentId: mp.id, financialAccountId: mp.financialAccountId, currency: mp.currency, amount: mp.amount, fees: mp.fees,
-        reference: mp.reference, metadata: mp.metadata, ownerId: mp.ownerId, payerPhone: mp.payerPhone, orderNumber: mp.orderNumber, occurredAt: mp.updateTime ?? mp.createTime,
+        reference: mp.reference, metadata: mp.metadata, ownerId: mp.ownerId, payerPhone: mp.payerPhone, orderNumber: mp.orderNumber, channelType: mp.channelType, occurredAt: mp.updateTime ?? mp.createTime,
       }),
       { timeout: 15_000 },
     );
