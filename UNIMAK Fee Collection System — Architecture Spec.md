@@ -385,6 +385,8 @@ Dots does everything USSD does, plus saved students, visible progress and a rece
 
 **Reminders** (phase 3): Dash push notifications 14 days and 3 days before a due date, for saved students with a balance.
 
+**Dot extras** (owner decisions, 2026-11-26; `docs/dot-extras.md`): payment history, receipts by payment ref, "ask someone to pay" requests and an exam clearance pass. Private routes need `X-User-Alias` (the Dash account's phone) to match the payer's phone: a check against browsing sequential IDs, not a login, since Dash sign-in tokens can't be verified by a server. Sponsors (another number) see only a short name and what to pay. Everything counts only payments Monime confirmed. Who is cleared for exams is the finance office's rule, editable in the admin API; the scanned pass page re-checks live.
+
 ## Admin portal
 
 The admin portal is a Vite + React app on Vercel, signed in through Supabase Auth, with every action checked by role on the backend.

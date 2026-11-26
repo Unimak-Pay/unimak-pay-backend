@@ -45,6 +45,9 @@ tags:
       Public API for the UNIMAK dot in Monime Dash. A dot's code is public, so there is no secret:
       requests are limited per IP (`DOT_RATE_LIMIT_PER_MINUTE`, 429 `RATE_LIMITED` with `Retry-After`),
       the lookup shows the full name but a masked phone (status lookups stay masked), and amounts and the receiving account are decided by the server.
+      From dot 0.2.3, `X-User-Alias` (the Dash account's phone) must match the payer's phone for private
+      details (full lookup, history, pay requests, clearance): 403 `ALIAS_MISMATCH` / `ALIAS_REQUIRED`.
+      It's a check, not a login. Sponsors (another number) get a short lookup and can still quote and pay.
       The dot pays with `dash.payments.request({ order, financialAccountId })` using what
       `POST /v1/dot/payments` returns; Monime's `payment.processing_completed` webhook (matched on
       `reference` = our payment id) is the only thing that marks it paid.

@@ -1,6 +1,6 @@
 # Dot extras: payment history, receipts, pay requests, exam clearance
 
-Status: **plan** (2026-11-26), waiting for the owner's OK. Contract: the dot repo's
+Status: **built** (2026-11-26). Owner decisions are in "Decisions" at the end; they override the plan text above where they differ. Contract: the dot repo's
 `docs/backend-api-additions.md` and `lib/types.ts` ("Endpoints the backend is adding").
 
 ## Principles
@@ -171,3 +171,24 @@ once Monime completes it. The order's metadata gains `payRequestCode`, for Monim
    dot has to send it. That needs an optional `paidByName` on `POST /v1/dot/payments`: a contract addition.
 4. **`method`.** Which field of Monime's Payment object says how it was paid (for example under `channel`)? Today we
    only read `channel.phoneNumber`.
+
+## Decisions (owner, 2026-11-26)
+
+1. **X-User-Alias** (contract section 0): phones compared on the national number, emails case-insensitively (an email
+   never matches: we only hold phones). A match is required for the full lookup, history, a payer's pay-request list,
+   creating a request and clearance; mismatch → 403 `ALIAS_MISMATCH` with a student-facing message. Missing header:
+   the lookup keeps today's behaviour unless `DOT_ALIAS_REQUIRED=true`; the new private routes answer 403
+   `ALIAS_REQUIRED` (published dots don't call them). Without a match the lookup returns
+   `{ kind, ref, shortName, limited: true, stale }` + obligations. Failed matches: `DOT_ALIAS_FAILURES_PER_HOUR` per IP
+   and per ID; over it the lookup answers short without checking and private routes answer 429.
+2. **Clearance rule:** still to come from the finance office. The stored rule says "every fee of the listed types in the
+   period, plus any fee past its due date, must be zero balance"; seeded as `First semester exams`, `2026/27`,
+   `[TUITION]`, overdue on, `placeholder: true`.
+3. **History and request lists** ship with names, behind the alias match (Dash sign-in tokens can't be verified by a
+   server).
+4. **`paidByName`** (first word only, ≤ 40, display only) and **`payingForSelf`** (default false) on
+   `POST /v1/dot/payments`. No phone matching.
+5. **`method`** from Monime's Payment `channel.type`: momo → Mobile money, card → Card, bank → Bank, wallet → Wallet;
+   otherwise null. Provider ids aren't mapped.
+6. **Academic year** from the obligations' periods (latest `YYYY/YY`); `totalPaid` = COMPLETED payments on
+   obligations in that period. Requests expire after 30 days or on the fee's due date, never less than 3 days.

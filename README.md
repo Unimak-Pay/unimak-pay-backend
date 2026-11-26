@@ -361,10 +361,16 @@ a Vercel Firewall rate-limit rule on `/v1/dot/` for a global one.
 
 | Method | Path | |
 |---|---|---|
-| GET | `/payers/:kind/:ref` | full name, programme, department/faculty names, level, intake, residency, applicant status, masked phone + obligations |
+| GET | `/payers/:kind/:ref` | alias matches (or no header): full name, programme, department/faculty names, level, intake, residency, applicant status, masked phone + obligations. Another number: `{kind, ref, shortName, limited: true, stale}` + obligations |
 | POST | `/quotes` | `{obligationId, amount}`, channel DOTS |
-| POST | `/payments` | `{obligationId, amount}` + `Idempotency-Key` header → `{paymentId, paymentRef, status, amount, expiresAt, order, financialAccountId}` |
+| POST | `/payments` | `{obligationId, amount, payRequestCode?, paidByName?, payingForSelf?}` + `Idempotency-Key` header → `{paymentId, paymentRef, status, amount, expiresAt, order, financialAccountId}` |
 | GET | `/payments/status/:ref` | by `paymentRef` or Monime's order number (payer masked) |
+| GET | `/payers/:kind/:ref/payments` | history (alias must match): completed, open, failed/expired from the last 30 days; `totalPaid` for the academic year |
+| GET | `/payments/:paymentRef/receipt` | 404 until Monime completed it; `verifyUrl` = `/r/{verifyCode}`; `pdfUrl` null for now |
+| POST | `/pay-requests` | ask someone to pay (alias must match; `Idempotency-Key`) |
+| GET | `/pay-requests/:code` | the sponsor's page (no match needed: the code is the secret); records `openedAt` |
+| GET | `/payers/:kind/:ref/pay-requests` | a payer's requests (alias must match) |
+| GET | `/payers/:kind/:ref/clearance` | exam clearance (students; alias must match); a CLEARED pass links to `/c/{code}`, which re-checks live |
 
 `POST /payments` holds the amount (15 min) and records a PENDING payment with collection
 method `DASH_SHEET`; it makes no Monime call. The dot passes `order` and
@@ -372,6 +378,17 @@ method `DASH_SHEET`; it makes no Monime call. The dot passes `order` and
 payment id, so Monime's `payment.processing_completed` settles it like any other payment
 (the webhook carries the reference, metadata and financial account). The dot must belong
 to the same Space as `MONIME_API_KEY`.
+
+**Dot extras** (`docs/dot-extras.md`). From dot 0.2.3 every request carries `X-User-Alias`,
+the Dash account's phone (or email). It's compared with the payer's phone on its national
+number, and it's a check, not a login: the dot sets it itself. Failed matches are limited
+per IP and per ID (`DOT_ALIAS_FAILURES_PER_HOUR`, default 10), the alias is never returned
+and only logged masked. A missing header keeps the old behaviour until
+`DOT_ALIAS_REQUIRED=true`. History, a request's contributions and clearance only ever count
+payments Monime confirmed COMPLETED; `paidByName` / `payingForSelf` are display only. Share
+links are `${DOT_LINK}/sponsor?request=&kind=&ref=&fee=&amount=`. The exam-clearance rule is
+the finance office's (`PUT /v1/admin/clearance-policy`, `clearance.manage`); the seeded one is
+a placeholder (`placeholder: true`).
 
 ### Portal events — `/v1/portal` (from the university portal)
 
@@ -555,7 +572,8 @@ Set on Vercel: `DATABASE_URL` (Supabase transaction pooler,
 `NODE_ENV=production`, `PUBLIC_BASE_URL`, the Monime and portal settings,
 `MONIME_WEBHOOK_SECRET` (32–256 chars), `CHANNEL_CLIENTS`, `CRON_SECRET`,
 `SUPABASE_URL` (admin auth), `USSD_RSA_PRIVATE_KEY` and `USSD_EXCHANGE_PATH_TOKEN`.
-Optional: `DOT_RATE_LIMIT_PER_MINUTE` (default 60); `PORTAL_EVENTS_SECRET` (32+ chars, shared with the portal;
+Optional: `DOT_RATE_LIMIT_PER_MINUTE` (default 60); `DOT_LINK` (the dot's Dash link, for share links);
+`DOT_ALIAS_REQUIRED` (default false) and `DOT_ALIAS_FAILURES_PER_HOUR` (default 10); `PORTAL_EVENTS_SECRET` (32+ chars, shared with the portal;
 unset = `/v1/portal/*` answers 503) and `PORTAL_EVENTS_SECRET_PREVIOUS` while rotating.
 Run `pnpm db:deploy` with `DIRECT_URL` before deploying a new migration, then
 `pnpm monime:provision` and `pnpm monime:register-webhook https://<domain>/webhooks/monime`
