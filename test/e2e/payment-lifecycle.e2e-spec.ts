@@ -114,3 +114,65 @@ describe('payment lifecycle', () => {
     expect(await prisma.auditLog.findFirstOrThrow({ where: { action: 'payment.delete_awaiting', entityId: b.paymentId } })).toMatchObject({ after: { reason: expect.stringContaining(a.paymentRef) } });
   });
 });
+
+describe('POST /v1/dot/payments/{paymentRef}/resume', () => {
+  const REF2 = 'UNI-2026-0602';
+  let ob2: string;
+  const resume = (ref: string) => http.post(`/v1/dot/payments/${ref}/resume`).set('x-real-ip', ip());
+  const start = async (amount: string) => {
+    const r = await http.post('/v1/dot/payments').set('x-real-ip', ip()).set('Idempotency-Key', `resume-${Date.now()}-${++seq}`).send({ obligationId: ob2, amount }).expect(201);
+    return r.body;
+  };
+
+  beforeAll(async () => {
+    await portal(http, 'post', '/v1/portal/events', { events: [{
+      id: `evt-resume-${Date.now()}`, type: 'student.upserted', occurredAt: '2026-11-28T09:00:00Z',
+      data: { studentId: REF2, applicationRef: null, fullName: 'Resume Case', phone: '+23276600602', programCode: 'BSC-CS', department: 'COMPUTER-SCI', level: 1, finalYear: false, residency: 'LOCAL', intake: '2026-SEP', enrolmentStatus: 'ACTIVE', updatedAt: '2026-11-28T09:00:00.000Z' },
+    }] }).expect(200);
+    ob2 = (await prisma.obligation.findFirstOrThrow({ where: { payer: { ref: REF2 }, fee: { feeType: { code: 'TUITION' } } } })).id;
+  });
+
+  it('a payment awaiting payment comes back with the same order; nothing new is created', async () => {
+    const p = await start('150000');
+    const before = await prisma.payment.count({ where: { obligationId: ob2 } });
+    const res = await resume(p.paymentRef).expect(200);
+    expect(res.body).toEqual(p);
+    expect(res.body.order.reference).toBe(p.paymentId);
+    expect(await prisma.payment.count({ where: { obligationId: ob2 } })).toBe(before);
+    // paying that order settles this payment
+    await simulate(p.paymentId, 'completed');
+    expect(await statusOf(p.paymentId)).toBe('COMPLETED');
+  });
+
+  it('409 once processing, paid, failed or expired; 404 when gone or unknown', async () => {
+    const p = await start('150000');
+    await simulate(p.paymentId, 'processing');
+    expect((await resume(p.paymentRef).expect(409)).body.error).toMatchObject({ code: 'INVALID_STATE', message: 'This payment is already being processed.' });
+    await simulate(p.paymentId, 'completed');
+    expect((await resume(p.paymentRef).expect(409)).body.error.message).toBe('This payment is already paid.');
+    for (const status of ['FAILED', 'EXPIRED'] as const) {
+      const q = await start('150000');
+      await prisma.payment.update({ where: { id: q.paymentId }, data: { status } });
+      expect((await resume(q.paymentRef).expect(409)).body.error.message).toBe("This payment can't be paid any more. Start a new one.");
+    }
+    const gone = await start('150000');
+    await prisma.payment.delete({ where: { id: gone.paymentId } });
+    await resume(gone.paymentRef).expect(404);
+    await resume('10000000').expect(404);
+    await resume('not-a-ref').expect(404);
+  });
+
+  it('422 when another payment has since taken the fee below this amount', async () => {
+    const payable = BigInt((await http.get(`/v1/dot/payers/student/${REF2}`).set('x-real-ip', ip()).expect(200)).body.obligations.find((o: { id: string }) => o.id === ob2).payable.value);
+    const whole = await start(payable.toString());
+    const other = await start('150000');
+    await simulate(other.paymentId, 'processing'); // holds 150,000
+    expect((await resume(whole.paymentRef).expect(422)).body.error.code).toBe('AMOUNT_EXCEEDS_PAYABLE');
+  });
+
+  it('a payment started on USSD is finished there', async () => {
+    const p = await start('150000');
+    await prisma.payment.update({ where: { id: p.paymentId }, data: { collectionMethod: 'PAYMENT_CODE' } });
+    expect((await resume(p.paymentRef).expect(409)).body.error.message).toBe('This payment was started on USSD. Finish it there, or start a new one here.');
+  });
+});

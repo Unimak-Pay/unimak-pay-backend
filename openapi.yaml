@@ -433,6 +433,51 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /v1/dot/payments/{paymentRef}/resume:
+    post:
+      operationId: dotResumePayment
+      tags: [Dash dot]
+      summary: Pay a payment that is still awaiting payment
+      description: |
+        Returns the same body as `POST /v1/dot/payments` (201) for a PENDING or INITIATED payment: the same
+        payment, `order` (reference = our payment id) and `financialAccountId`, so paying it settles this
+        payment. Nothing new is created. No `X-User-Alias` match: the paymentRef is the secret, as for the
+        status check (sponsors can finish their own payment).
+        - PROCESSING: 409 `INVALID_STATE` "This payment is already being processed."
+        - COMPLETED: 409 "This payment is already paid."
+        - FAILED / EXPIRED: 409 "This payment can't be paid any more. Start a new one."
+        - Started on USSD (a payment code): 409 "This payment was started on USSD. Finish it there, or start a
+          new one here." (its code is still live at Monime; paying through Dash too could collect twice)
+        - Unknown or deleted: 404.
+        - The amount is checked against the fee's payable now, as quotes do: 422 `AMOUNT_EXCEEDS_PAYABLE` if
+          another payment has taken the fee below it.
+        Before calling `dash.payments.request()` again, call `dash.payments.get(reference)`: if Dash already has
+        a payment for this order, wait for it instead of opening a second sheet.
+      security: []
+      parameters:
+        - { name: paymentRef, in: path, required: true, schema: { $ref: '#/components/schemas/PaymentRef' } }
+        - $ref: '#/components/parameters/UserAlias'
+      responses:
+        '200':
+          description: The payment and its order, as when it was started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [paymentId, paymentRef, status, amount, expiresAt, order, financialAccountId]
+                properties:
+                  paymentId: { type: string, format: uuid }
+                  paymentRef: { $ref: '#/components/schemas/PaymentRef' }
+                  status: { $ref: '#/components/schemas/PaymentStatus' }
+                  amount: { $ref: '#/components/schemas/Money' }
+                  expiresAt: { type: string, format: date-time, description: 'Deleted if still unpaid by then' }
+                  order: { $ref: '#/components/schemas/DashOrder' }
+                  financialAccountId: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   /v1/dot/payers/{kind}/{ref}/receipts:
     get:
       operationId: dotListReceipts

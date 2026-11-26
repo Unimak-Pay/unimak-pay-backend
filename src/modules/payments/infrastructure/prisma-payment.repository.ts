@@ -19,6 +19,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return db.payment.findUnique({ where: { id } });
   }
 
+  byPaymentRef(paymentRef: string, db: Db = this.prisma): Promise<PaymentRecord | null> {
+    return db.payment.findUnique({ where: { paymentRef } });
+  }
+
   byMonimeRef(monimeRef: string, db: Db = this.prisma): Promise<PaymentRecord | null> {
     return db.payment.findUnique({ where: { monimeRef } });
   }

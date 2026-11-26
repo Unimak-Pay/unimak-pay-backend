@@ -6,7 +6,8 @@ import type { PayerKind } from '../../catalog/domain/payer-profile';
 import { LookupPayerUseCase } from '../../payers/application/lookup-payer.use-case';
 import { PayerObligationsQuery } from '../../payers/application/payer-obligations.query';
 import { InitiatePaymentUseCase } from '../../payments/application/initiate-payment.use-case';
-import { PAYMENT_REPOSITORY, type PaymentRepository } from '../../payments/application/payment.repository';
+import { PAYMENT_REPOSITORY, type PaymentRecord, type PaymentRepository } from '../../payments/application/payment.repository';
+import { PAYMENT_REF } from '../../payments/domain/payment-ref';
 import { PaymentStatusQuery } from '../../payments/application/payment-status.query';
 import { QuotePaymentUseCase } from '../../payments/application/quote-payment.use-case';
 import { shortName } from '../../../shared/domain/mask';
@@ -105,7 +106,41 @@ export class DotController {
       collection: 'DASH_SHEET',
       idempotencyKey: key,
     });
+    return this.paymentStart(p);
+  }
+
+  /**
+   * Pay a payment that is still awaiting payment (the dot lost its sheet, or a sponsor
+   * comes back): the same payment, order and reference, so paying it settles this one.
+   * No alias match: the paymentRef is the secret, as for the status check.
+   */
+  @Post('payments/:paymentRef/resume')
+  @HttpCode(200)
+  async resumePayment(@Param('paymentRef') paymentRef: string) {
+    const ref = paymentRef.slice(0, 20);
+    const p = PAYMENT_REF.test(ref) ? await this.payments.byPaymentRef(ref) : null;
+    if (!p) throw new DomainError('NOT_FOUND', 'Payment not found');
+    switch (p.status) {
+      case 'INITIATED':
+      case 'PENDING':
+        break;
+      case 'PROCESSING': throw new DomainError('INVALID_STATE', 'This payment is already being processed.', { status: p.status });
+      case 'COMPLETED': throw new DomainError('INVALID_STATE', 'This payment is already paid.', { status: p.status });
+      default: throw new DomainError('INVALID_STATE', "This payment can't be paid any more. Start a new one.", { status: p.status });
+    }
+    if (p.collectionMethod !== 'DASH_SHEET') {
+      // a USSD payment code is still live at Monime; paying through Dash too could collect twice
+      throw new DomainError('INVALID_STATE', 'This payment was started on USSD. Finish it there, or start a new one here.', { collectionMethod: p.collectionMethod });
+    }
+    // against the fee as it is now (as quotes do): another payment may have paid it down
+    await this.quote.execute({ obligationId: p.obligationId, amount: p.amount, channel: 'DOTS' });
+    return this.paymentStart(p);
+  }
+
+  /** POST /payments' response: the order for dash.payments.request(), built the same way every time. */
+  private async paymentStart(p: PaymentRecord) {
     const o = (await this.payments.obligationInfo(p.obligationId))!;
+    const code = p.payRequestId ? (await this.payRequests.codeOf(p.payRequestId)) ?? undefined : undefined;
     const v = presentPayment(p);
     return {
       paymentId: v.paymentId,
@@ -113,10 +148,11 @@ export class DotController {
       status: v.status,
       amount: v.amount,
       expiresAt: v.expiresAt,
-      order: presentDotOrder(p, o, dto.payRequestCode ? dto.payRequestCode.toUpperCase() : undefined),
+      order: presentDotOrder(p, o, code),
       financialAccountId: o.settlementAccount!,
     };
   }
+
 
   /** By our 8-digit payment ref or Monime's order number; payer details masked. */
   @Get('payments/status/:ref')

@@ -116,6 +116,10 @@ export class PayRequestsService {
     return row.id;
   }
 
+  async codeOf(id: string): Promise<string | null> {
+    return (await this.prisma.payRequest.findUnique({ where: { id }, select: { code: true } }))?.code ?? null;
+  }
+
   private replay(row: Row, requestHash: string, now: Date) {
     if (row.requestHash !== requestHash) throw new DomainError('IDEMPOTENCY_CONFLICT', 'Idempotency-Key was used for a different request');
     return this.present(row, now);

@@ -91,6 +91,8 @@ export interface LockedObligation {
 
 export interface PaymentRepository {
   byId(id: string, db?: Db): Promise<PaymentRecord | null>;
+  /** by our 8-digit payment ref */
+  byPaymentRef(paymentRef: string, db?: Db): Promise<PaymentRecord | null>;
   byMonimeRef(ref: string, db?: Db): Promise<PaymentRecord | null>;
   byMonimePaymentId(id: string, db?: Db): Promise<PaymentRecord | null>;
   byIdempotencyKey(clientId: string, key: string, db?: Db): Promise<PaymentRecord | null>;
