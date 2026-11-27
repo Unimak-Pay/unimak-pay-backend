@@ -131,7 +131,7 @@ describe('pay requests', () => {
       recipientName: 'Fatmata', contributions: [], openedAt: null,
     });
     const url = new URL(res.body.shareUrl);
-    expect(`${url.origin}${url.pathname}`).toBe('https://dashit.to/d/k6X5mJ6TFSnLUm8KwUjqWu4Mcf5/sponsor');
+    expect(`${url.origin}${url.pathname}`).toBe('https://dashit.to/d/TAu6P/sponsor');
     expect(Object.fromEntries(url.searchParams)).toEqual({ request: code, kind: 'student', ref: ME, fee: obligationId, amount: '20000' });
     expect(new Date(res.body.expiresAt).getTime() - Date.now()).toBeGreaterThan(29 * 86_400_000);
 

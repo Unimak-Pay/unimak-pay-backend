@@ -61,7 +61,7 @@ model ClearancePass {
 }
 ```
 
-New env: `DOT_LINK` (default `https://dashit.to/d/k6X5mJ6TFSnLUm8KwUjqWu4Mcf5`), `ACADEMIC_YEAR_START_MONTH`
+New env: `DOT_LINK` (default `https://dashit.to/d/TAu6P`: the dot's link Code from `monime dot describe`, not its id), `ACADEMIC_YEAR_START_MONTH`
 (default 9).
 
 ## Endpoints

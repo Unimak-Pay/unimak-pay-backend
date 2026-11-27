@@ -209,9 +209,13 @@ export class EnvSchema {
   @Max(10_000)
   DOT_RATE_LIMIT_PER_MINUTE = 60;
 
-  /** The dot's Dash link; pay-request share links are `${DOT_LINK}/sponsor?…`. */
+  /**
+   * The dot's Dash link, built from its link Code (`monime dot describe` → Code), not its id:
+   * `https://dashit.to/d/<Code>`. Pay-request share links are `${DOT_LINK}/sponsor?…`.
+   * A server setting only; never taken from a request.
+   */
   @IsUrl({ require_tld: false })
-  DOT_LINK = 'https://dashit.to/d/k6X5mJ6TFSnLUm8KwUjqWu4Mcf5';
+  DOT_LINK = 'https://dashit.to/d/TAu6P';
 
   /**
    * Require X-User-Alias on the dot's payer routes. Off while published dots
