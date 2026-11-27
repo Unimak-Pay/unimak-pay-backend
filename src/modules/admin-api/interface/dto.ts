@@ -23,8 +23,8 @@ export class PaymentsQuery extends PageQuery {
   @IsOptional() @IsIn(['INITIATED', 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'EXPIRED'])
   status?: 'INITIATED' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
 
-  @IsOptional() @IsIn(['USSD', 'DOTS'])
-  channel?: 'USSD' | 'DOTS';
+  @IsOptional() @IsIn(['USSD', 'DOTS', 'WEB'])
+  channel?: 'USSD' | 'DOTS' | 'WEB';
 
   @IsOptional() @IsString() @Length(1, 20)
   feeType?: string;
@@ -60,8 +60,8 @@ export class PaymentsExportQuery {
   @IsOptional() @IsIn(['INITIATED', 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'EXPIRED'])
   status?: 'INITIATED' | 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
 
-  @IsOptional() @IsIn(['USSD', 'DOTS'])
-  channel?: 'USSD' | 'DOTS';
+  @IsOptional() @IsIn(['USSD', 'DOTS', 'WEB'])
+  channel?: 'USSD' | 'DOTS' | 'WEB';
 
   @IsOptional() @IsString() @Length(1, 20)
   feeType?: string;
@@ -99,8 +99,8 @@ export class ReportsSummaryQueryDto {
   @IsOptional() @IsString() @Length(1, 20)
   feeType?: string;
 
-  @IsOptional() @IsIn(['USSD', 'DOTS'])
-  channel?: 'USSD' | 'DOTS';
+  @IsOptional() @IsIn(['USSD', 'DOTS', 'WEB'])
+  channel?: 'USSD' | 'DOTS' | 'WEB';
 
   /** Department.code */
   @IsOptional() @IsString() @Length(1, 40)
@@ -427,8 +427,8 @@ export class ReceiptsQuery extends PageQuery {
   @IsOptional() @Matches(CODE)
   department?: string;
 
-  @IsOptional() @IsIn(['USSD', 'DOTS'])
-  channel?: 'USSD' | 'DOTS';
+  @IsOptional() @IsIn(['USSD', 'DOTS', 'WEB'])
+  channel?: 'USSD' | 'DOTS' | 'WEB';
 
   @IsOptional() @IsString() @Length(1, 64)
   payerRef?: string;

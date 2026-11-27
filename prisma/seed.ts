@@ -94,6 +94,8 @@ const PRICING = [
   { channel: 'USSD', totalRateBps: 250, monimeRateBps: 100, monimeFlat: 0n, effectiveFrom: new Date('2026-01-01T00:00:00Z') },
   // DOTS: Monime SLE 0.50 flat, platform 2.5% − 0.50 (≥ 0)
   { channel: 'DOTS', totalRateBps: 250, monimeRateBps: 0, monimeFlat: SLE(0.5), effectiveFrom: new Date('2026-01-01T00:00:00Z') },
+  // WEB (sponsor checkout in a browser): Monime 1.5% (published local rate), platform 1%
+  { channel: 'WEB', totalRateBps: 250, monimeRateBps: 150, monimeFlat: 0n, effectiveFrom: new Date('2026-01-01T00:00:00Z') },
 ] as const;
 
 async function main(): Promise<void> {

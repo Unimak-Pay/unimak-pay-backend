@@ -50,6 +50,8 @@ enum LedgerEntryType {
 enum Channel {
   USSD
   DOTS
+  /// a sponsor paying in a web browser through Monime's hosted checkout (pay request link)
+  WEB
 }
 
 /// How Monime collects: a payment code we create, or the USSD flow's collect_payment template.
@@ -58,6 +60,8 @@ enum CollectionMethod {
   USSD_FLOW
   /// Dash payment sheet in the UNIMAK dot (dash.payments.request with our payment id as reference)
   DASH_SHEET
+  /// Monime checkout session (hosted page) for one payment method, created when the sponsor picks it
+  CHECKOUT_SESSION
 }
 
 enum PaymentStatus {
@@ -311,6 +315,10 @@ model Payment {
   payingForSelf     Boolean @default(false)
   /// Monime's Payment channel.type from the completed payment: bank | card | momo | wallet
   monimeChannelType String?
+  /// Monime checkout session (cos-…) for CHECKOUT_SESSION payments
+  checkoutSessionId String?          @unique
+  /// Monime's hosted page for that session (redirectUrl)
+  checkoutUrl       String?
 
   obligation    Obligation       @relation(fields: [obligationId], references: [id])
   pricingConfig PricingConfig    @relation(fields: [pricingConfigId], references: [id])

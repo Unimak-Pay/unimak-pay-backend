@@ -19,7 +19,7 @@ export interface ReceiptFilters {
   feeType?: string;
   faculty?: string;
   department?: string;
-  channel?: 'USSD' | 'DOTS';
+  channel?: 'USSD' | 'DOTS' | 'WEB';
   payerRef?: string;
   /** a receipt number, payment ref or Monime order number */
   q?: string;

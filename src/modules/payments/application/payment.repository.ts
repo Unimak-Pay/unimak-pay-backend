@@ -3,8 +3,11 @@ import type { Db } from '../../../shared/infrastructure/prisma.service';
 import type { Channel } from '../../catalog/application/catalog.repository';
 import type { PaymentStatus } from '../domain/payment-status';
 
-/** PAYMENT_CODE: we create a Monime payment code; USSD_FLOW / DASH_SHEET: the channel collects in-session. */
-export type CollectionMethod = 'PAYMENT_CODE' | 'USSD_FLOW' | 'DASH_SHEET';
+/**
+ * PAYMENT_CODE: we create a Monime payment code; USSD_FLOW / DASH_SHEET: the channel collects
+ * in-session; CHECKOUT_SESSION: we create a Monime checkout session (hosted page).
+ */
+export type CollectionMethod = 'PAYMENT_CODE' | 'USSD_FLOW' | 'DASH_SHEET' | 'CHECKOUT_SESSION';
 
 export const PAYMENT_REPOSITORY = Symbol('PaymentRepository');
 
@@ -43,6 +46,9 @@ export interface PaymentRecord {
   monimeChannelType: string | null;
   /** Monime's payment.processing_started */
   processingAt: Date | null;
+  /** CHECKOUT_SESSION: Monime's session id and hosted page */
+  checkoutSessionId: string | null;
+  checkoutUrl: string | null;
   createdAt: Date;
 }
 
@@ -111,7 +117,7 @@ export interface PaymentRepository {
   create(p: NewPayment, db: Db): Promise<PaymentRecord>;
   update(
     id: string,
-    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'ussdCode' | 'monimePaymentId' | 'monimeOrderNumber' | 'monimeChannelType' | 'payerPhone' | 'processingAt' | 'completedAt' | 'failureReason'>>,
+    patch: Partial<Pick<PaymentRecord, 'status' | 'monimeRef' | 'ussdCode' | 'monimePaymentId' | 'monimeOrderNumber' | 'monimeChannelType' | 'payerPhone' | 'processingAt' | 'completedAt' | 'failureReason' | 'checkoutSessionId' | 'checkoutUrl'>>,
     db?: Db,
   ): Promise<PaymentRecord>;
   /** PROCESSING with nothing from Monime for PROCESSING_TIMEOUT → back to PENDING. Returns count. */

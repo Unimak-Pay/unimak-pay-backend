@@ -34,6 +34,11 @@ export class SimulateWebhookDto {
   @Matches(/^\+\d{8,15}$/)
   payerPhone?: string;
 
+  /** Monime channel.type of the payment (default momo). */
+  @IsOptional()
+  @IsIn(['momo', 'card', 'bank', 'wallet'])
+  channelType?: 'momo' | 'card' | 'bank' | 'wallet';
+
   /** Extra payment metadata, e.g. { payer_phone } as a USSD flow would send it. */
   @IsOptional()
   @IsObject()

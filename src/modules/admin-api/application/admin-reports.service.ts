@@ -15,7 +15,7 @@ export interface ReportsSummaryQuery {
   /** YYYY-MM-DD, inclusive. Default: today. */
   to?: string;
   feeType?: string;
-  channel?: 'USSD' | 'DOTS';
+  channel?: 'USSD' | 'DOTS' | 'WEB';
   /** Department.code */
   department?: string;
   /** Faculty.code: its departments as they are now */
@@ -120,7 +120,7 @@ export class AdminReportsService {
       /** facultyCode null: departments without a faculty (needing review) or payers without a department */
       byFaculty: byFaculty.map((r) => ({ facultyCode: r.code, facultyName: r.name, amount: r.amount, count: r.count })),
       byDepartment: byDepartment.map((r) => ({ department: r.code, departmentName: r.name, facultyCode: r.faculty, amount: r.amount, count: r.count })),
-      byChannel: (['USSD', 'DOTS'] as const)
+      byChannel: (['USSD', 'DOTS', 'WEB'] as const)
         .filter((c) => !q.channel || q.channel === c)
         .map((c) => {
           const r = byChannel.find((x) => x.channel === c);

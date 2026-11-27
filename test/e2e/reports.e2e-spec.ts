@@ -65,7 +65,7 @@ describe('GET /v1/admin/reports/summary', () => {
     expect(fee(after, 'GRAD') - fee(before, 'GRAD')).toBe(75_000n);
     const ch = (body: { byChannel: { channel: string; amount: string }[] }, c: string) => BigInt(body.byChannel.find((r) => r.channel === c)!.amount);
     expect(ch(after, 'DOTS') - ch(before, 'DOTS')).toBe(75_000n);
-    expect(after.byChannel.map((r: { channel: string }) => r.channel)).toEqual(['USSD', 'DOTS']);
+    expect(after.byChannel.map((r: { channel: string }) => r.channel)).toEqual(['USSD', 'DOTS', 'WEB']);
 
     expect(after.payments.started - before.payments.started).toBe(3);
     expect(after.payments.pending.count - before.payments.pending.count).toBe(1);

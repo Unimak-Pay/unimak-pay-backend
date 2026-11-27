@@ -4,7 +4,7 @@ import type { FeeWithRules } from '../domain/fee';
 import type { PayerKind } from '../domain/payer-profile';
 import type { RateRule } from '../domain/rate-rule';
 
-export type Channel = 'USSD' | 'DOTS';
+export type Channel = 'USSD' | 'DOTS' | 'WEB';
 
 export interface PricingConfigView {
   id: string;

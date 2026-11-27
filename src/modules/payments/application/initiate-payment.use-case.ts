@@ -5,7 +5,7 @@ import { DomainError } from '../../../shared/domain/errors';
 import type { Minor } from '../../../shared/domain/money';
 import { PrismaService } from '../../../shared/infrastructure/prisma.service';
 import type { Channel } from '../../catalog/application/catalog.repository';
-import { MONIME_CLIENT, type MonimeClient, MonimeError } from '../../integrations/monime/monime.port';
+import { type CheckoutMethod, MONIME_CLIENT, type MonimeClient, MonimeError } from '../../integrations/monime/monime.port';
 import { PaymentEvaluator } from './payment-evaluator';
 import { type CollectionMethod, PAYMENT_REPOSITORY, type PaymentRecord, type PaymentRepository } from './payment.repository';
 
@@ -25,8 +25,11 @@ export interface InitiatePaymentInput {
    * we only record the PENDING payment (the hold) and return.
    * DASH_SHEET: the dot asks Dash's payment sheet for it (reference = our payment
    * id); likewise we only record the PENDING payment.
+   * CHECKOUT_SESSION: we create a Monime checkout session after commit (needs `checkout`).
    */
   collection?: CollectionMethod;
+  /** CHECKOUT_SESSION: the hosted page's method, title and return pages */
+  checkout?: CheckoutOptions;
   /** dot: the pay request this payment goes towards (already checked by the caller) */
   payRequestId?: string | null;
   /** dot: first name the paying person gave; display only */
@@ -34,6 +37,20 @@ export interface InitiatePaymentInput {
   /** dot: the payer is paying for themselves; display only */
   payingForSelf?: boolean;
 }
+
+export interface CheckoutOptions {
+  method: CheckoutMethod;
+  /** session title, e.g. "UNIMAK · Tuition 2026/27" */
+  name: string;
+  /** the single line item, e.g. "Tuition 2026/27 for Aminata K." */
+  lineItemName: string;
+  /** given the payment, where Monime sends the payer back */
+  successUrl: (p: PaymentRecord) => string;
+  cancelUrl: (p: PaymentRecord) => string;
+}
+
+/** UNIMAK green on Monime's hosted page. */
+const CHECKOUT_COLOR = '#13261F';
 
 /**
  * 1. Idempotency: same (client, key) returns the same payment (and retries the
@@ -101,6 +118,7 @@ export class InitiatePaymentUseCase {
       }
       throw err;
     }
+    if (payment.collectionMethod === 'CHECKOUT_SESSION') return this.startCheckout(payment, input);
     if (payment.collectionMethod !== 'PAYMENT_CODE') return this.payments.update(payment.id, { status: 'PENDING' });
     return this.startCollection(payment);
   }
@@ -113,6 +131,8 @@ export class InitiatePaymentUseCase {
     ) {
       throw new DomainError('IDEMPOTENCY_CONFLICT', 'Idempotency key was used for a different payment');
     }
+    // the caller puts the method in the key, so a replay is for the same hosted page
+    if (p.collectionMethod === 'CHECKOUT_SESSION') return p.status === 'INITIATED' && !p.checkoutUrl ? this.startCheckout(p, input) : p;
     if (p.collectionMethod !== 'PAYMENT_CODE') return p;
     if (p.status === 'INITIATED' && !p.monimeRef && p.expiresAt > now) return this.startCollection(p);
     return p;
@@ -147,6 +167,43 @@ export class InitiatePaymentUseCase {
       throw new DomainError('UPSTREAM_UNAVAILABLE', 'Payment provider unavailable, retry with the same idempotencyKey', {
         paymentId: p.id,
       });
+    }
+  }
+
+  /** Creates the hosted checkout page for one method; the payment becomes PENDING with its URL. */
+  private async startCheckout(p: PaymentRecord, input: InitiatePaymentInput): Promise<PaymentRecord> {
+    const c = input.checkout;
+    if (!c) throw new Error('CHECKOUT_SESSION needs checkout options');
+    const o = (await this.payments.obligationInfo(p.obligationId))!;
+    try {
+      const cs = await this.monime.createCheckoutSession({
+        idempotencyKey: p.id,
+        name: c.name,
+        lineItemName: c.lineItemName,
+        amount: p.amount,
+        reference: p.id,
+        financialAccountId: o.settlementAccount!,
+        successUrl: c.successUrl(p),
+        cancelUrl: c.cancelUrl(p),
+        method: c.method,
+        primaryColor: CHECKOUT_COLOR,
+        metadata: {
+          paymentId: p.id, paymentRef: p.paymentRef, obligationId: o.id, payerRef: o.payerRef, feeTypeCode: o.feeTypeCode, channel: p.channel,
+          ...(p.payRequestId ? { payRequestId: p.payRequestId } : {}),
+        },
+      });
+      return await this.prisma.$transaction(async (tx) => {
+        const cur = (await this.payments.lockPayment(p.id, tx))!;
+        const link = { checkoutSessionId: cs.id, checkoutUrl: cs.redirectUrl };
+        return this.payments.update(p.id, cur.status === 'INITIATED' ? { ...link, status: 'PENDING' } : link, tx);
+      });
+    } catch (err) {
+      if (err instanceof MonimeError && err.code === 'REJECTED') {
+        this.logger.warn(`Monime rejected checkout for payment ${p.id}: ${err.message}`);
+        return this.transitionAfterInitiate(p.id, { status: 'FAILED', failureReason: `monime_rejected: ${err.message}` });
+      }
+      this.logger.error(`Monime checkout failed for payment ${p.id}: ${(err as Error).message}`);
+      throw new DomainError('UPSTREAM_UNAVAILABLE', 'Payment provider unavailable, try again', { paymentId: p.id });
     }
   }
 
