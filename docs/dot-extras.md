@@ -116,6 +116,34 @@ obligation (otherwise 404 or 409 `INVALID_STATE`). Its id is written to `Payment
 that creates the payment. An idempotent replay must carry the same code. The payment counts towards the request only
 once Monime completes it. The order's metadata gains `payRequestCode`, for Monime's dashboard.
 
+### 3a. Sponsors paying in a browser (`webUrl`, `/p/{code}`)
+
+Every pay request also carries `webUrl` = `${PUBLIC_BASE_URL}/p/{code}`. It opens in any
+browser, so the sponsor needs no app. `shareUrl` (the Dash link) is unchanged.
+
+- `GET /p/{code}`: the student's first name and programme, the fee, the amount (or an amount
+  field for "whatever you can"), the student's message, and two buttons: **Pay with mobile
+  money** and **Pay with card**. A paid, cancelled or expired request says so instead.
+- `POST /p/{code}/checkout` (the form): records a payment towards the request (channel `WEB`,
+  collection `CHECKOUT_SESSION`, `PENDING`, holds nothing), then creates a Monime checkout
+  session that offers only the chosen method (`paymentOptions`: the other method, bank and
+  wallet disabled) and redirects (303) to Monime's `redirectUrl`. The session is created at
+  the click, so Monime's fixed session expiry never matters and the amount is checked
+  against the fee at that moment: a fixed request pays what is left of it (capped by what the
+  fee can take), an open one pays the typed amount. Session `reference` and
+  `metadata.paymentId` = our payment id; settled into the fee type's financial account.
+- Double submit of the same form (same one-time `key` and method) returns the same page. At
+  most 10 checkout pages per request per hour, plus the per-IP limit.
+- `GET /p/{code}/done?ref={paymentRef}` (Monime's `successUrl`): "waiting for confirmation",
+  refreshing every 5 s, until Monime's `payment.completed` settles it; then the receipt number
+  and the receipt check link. `cancelUrl` goes back to `/p/{code}`.
+- Settlement is the existing `payment.completed` handler (matched by `metadata.paymentId`).
+  `checkout_session.completed` is still ignored. An unused attempt is deleted after 7 days
+  like any payment awaiting payment; two attempts both paid → the second is flagged as an
+  overpayment.
+- Pricing: a `WEB` pricing row (total 2.5%, Monime 1.5%, Monime's published local rate) is
+  added by migration `20261129090100_web_pricing`.
+
 ### 4. `GET /v1/dot/payers/{kind}/{ref}/clearance`
 
 - Evaluated live from the payer's obligations and the **current clearance policy**, which the finance office edits in

@@ -12,10 +12,12 @@ import { DotRateLimitGuard } from './interface/dot-rate-limit.guard';
 import { DotController } from './interface/dot.controller';
 import { PublicReceiptController } from './interface/public-receipt.controller';
 import { PublicClearanceController } from './interface/public-clearance.controller';
+import { PublicSponsorController } from './interface/public-sponsor.controller';
+import { SponsorCheckoutService } from './application/sponsor-checkout.service';
 
 @Module({
   imports: [AcademicsModule, PayersModule, PaymentsModule, ReceiptsModule, DotExtrasModule],
-  controllers: [ChannelController, DotController, PublicReceiptController, PublicClearanceController],
-  providers: [ChannelClients, ChannelAuthGuard, DotRateLimitGuard, DotAliasCheck],
+  controllers: [ChannelController, DotController, PublicReceiptController, PublicClearanceController, PublicSponsorController],
+  providers: [ChannelClients, ChannelAuthGuard, DotRateLimitGuard, DotAliasCheck, SponsorCheckoutService],
 })
 export class ChannelApiModule {}

@@ -128,6 +128,78 @@ paths:
         '404': { description: Unknown code, content: { text/html: { schema: { type: string } } } }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /p/{code}:
+    get:
+      operationId: publicSponsorPage
+      tags: [Public]
+      summary: Pay request page a sponsor opens in any browser (the pay request's webUrl)
+      description: |
+        Shows the student's first name and programme, the fee, the amount (or an amount field for
+        "whatever you can" requests) and the student's message, with two buttons: "Pay with mobile
+        money" and "Pay with card". A closed request (paid, cancelled, expired) says so instead.
+        Records the request's first open, like the dot's GET. `noindex`, `Cache-Control no-store`;
+        rate-limited per IP like the dot API. See docs/dot-extras.md §3a.
+      security: []
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, example: K7M2QXP }, description: The pay request code }
+      responses:
+        '200': { description: The page, content: { text/html: { schema: { type: string } } } }
+        '404': { description: Unknown code, content: { text/html: { schema: { type: string } } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /p/{code}/checkout:
+    post:
+      operationId: publicSponsorCheckout
+      tags: [Public]
+      summary: Start paying a pay request through Monime's checkout (the page's form)
+      description: |
+        Records a payment towards the request (channel WEB, collectionMethod CHECKOUT_SESSION,
+        PENDING: it holds nothing) and creates a Monime checkout session that offers only the
+        chosen method, then redirects (303) to Monime's hosted page. A fixed request pays what is
+        left of it (capped by what the fee can take); an open one pays the typed amount. Only
+        Monime's `payment.completed` settles it. The same form `key` and method open the same page
+        again; at most 10 checkout pages per request per hour. Errors re-show the page with a message.
+      security: []
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [method, key]
+              properties:
+                method: { type: string, enum: [momo, card] }
+                key: { type: string, pattern: '^[A-Za-z0-9_-]{16,40}$', description: One-time form key the page puts in }
+                amount: { type: string, description: 'Leones, e.g. "500" or "500.50"; only for requests without an amount' }
+                name: { type: string, maxLength: 40, description: "Sponsor's name, shown to the student (display only)" }
+      responses:
+        '303': { description: 'Redirect to Monime''s hosted checkout', headers: { Location: { schema: { type: string, format: uri } } } }
+        '400': { description: Bad method, key or amount, content: { text/html: { schema: { type: string } } } }
+        '404': { description: Unknown code, content: { text/html: { schema: { type: string } } } }
+        '409': { description: The request is paid or closed, content: { text/html: { schema: { type: string } } } }
+        '429': { description: Too many checkout pages for this link (or this IP), content: { text/html: { schema: { type: string } } } }
+        '503': { description: Monime unavailable, content: { text/html: { schema: { type: string } } } }
+
+  /p/{code}/done:
+    get:
+      operationId: publicSponsorDone
+      tags: [Public]
+      summary: Where Monime sends the sponsor back (successUrl)
+      description: |
+        "Waiting for confirmation" (refreshes every 5 s) until Monime's payment.completed arrives,
+        then the receipt number and a link to the receipt check page. Nothing is settled from this
+        page; arriving here only means the sponsor left Monime's page.
+      security: []
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: ref, in: query, required: true, schema: { type: string, pattern: '^[1-9]\d{7}$' }, description: The payment's paymentRef }
+      responses:
+        '200': { description: Waiting, paid or not completed, content: { text/html: { schema: { type: string } } } }
+        '404': { description: No such payment for this request, content: { text/html: { schema: { type: string } } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   # ── Channel API ─────────────────────────────────────────────────────────────
   /v1/channel/payers/{kind}/{ref}:
     get:
@@ -2623,10 +2695,11 @@ components:
         updatedAt: { type: string, format: date-time }
     PayRequest:
       type: object
-      required: [code, shareUrl, obligationId, feeName, amount, paid, status, message, requester, recipientName, contributions, openedAt, createdAt, expiresAt]
+      required: [code, shareUrl, webUrl, obligationId, feeName, amount, paid, status, message, requester, recipientName, contributions, openedAt, createdAt, expiresAt]
       properties:
         code: { type: string, example: K7PQ2XA }
         shareUrl: { type: string, format: uri, description: '`${DOT_LINK}/sponsor?request=&kind=&ref=&fee=&amount=` (amount empty when null)' }
+        webUrl: { type: string, format: uri, description: '`${PUBLIC_BASE_URL}/p/{code}`: opens in any browser; the sponsor pays by mobile money or card through Monime''s checkout' }
         obligationId: { type: string, format: uuid }
         feeName: { type: string }
         amount: { oneOf: [{ $ref: '#/components/schemas/Money' }, { type: 'null' }] }
@@ -3579,7 +3652,7 @@ components:
         sentAt: { type: [ string, "null" ], format: date-time }
     Payment:
       type: object
-      required: [ id, obligationId, amount, channel, clientId, idempotencyKey, paymentRef, payerPhone, phoneAuthorized, collectionMethod, status, monimeRef, ussdCode, monimePaymentId, monimeOrderNumber, pricingConfigId, monimeFee, platformFee, netAmount, expiresAt, processingAt, completedAt, failureReason, createdAt, updatedAt, payRequestId, paidByName, payingForSelf, monimeChannelType ]
+      required: [ id, obligationId, amount, channel, clientId, idempotencyKey, paymentRef, payerPhone, phoneAuthorized, collectionMethod, status, monimeRef, ussdCode, monimePaymentId, monimeOrderNumber, pricingConfigId, monimeFee, platformFee, netAmount, expiresAt, processingAt, completedAt, failureReason, createdAt, updatedAt, payRequestId, paidByName, payingForSelf, monimeChannelType, checkoutSessionId, checkoutUrl ]
       properties:
         id: { type: string, format: uuid }
         obligationId: { type: string, format: uuid }
@@ -3610,6 +3683,8 @@ components:
         paidByName: { description: "first name the paying person gave in the dot (display only, never trusted)", type: [ string, "null" ] }
         payingForSelf: { description: the dot said the student saved on that phone is paying for themselves (display only), type: boolean }
         monimeChannelType: { description: "Monime's Payment channel.type from the completed payment: bank | card | momo | wallet", type: [ string, "null" ] }
+        checkoutSessionId: { description: Monime checkout session (cos-…) for CHECKOUT_SESSION payments, type: [ string, "null" ] }
+        checkoutUrl: { description: Monime's hosted page for that session (redirectUrl), type: [ string, "null" ] }
     Payout:
       type: object
       description: Withdrawal from one of our Monime accounts to a bank (or momo) account.
@@ -3747,10 +3822,10 @@ components:
       enum: [ SUPER_ADMIN, BURSAR, FINANCE_OFFICER, HEAD_OF_DEPARTMENT, DEAN, AUDITOR ]
     Channel:
       type: string
-      enum: [ USSD, DOTS ]
+      enum: [ USSD, DOTS, WEB ]
     CollectionMethod:
       type: string
-      enum: [ PAYMENT_CODE, USSD_FLOW, DASH_SHEET ]
+      enum: [ PAYMENT_CODE, USSD_FLOW, DASH_SHEET, CHECKOUT_SESSION ]
     FeeStatus:
       type: string
       enum: [ DRAFT, ACTIVE, CLOSED ]

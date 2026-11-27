@@ -11,6 +11,7 @@ import {
   cleanText, firstName, isPayable, isPayRequestCode, MAX_OPEN_PAY_REQUESTS, MESSAGE_MAX, newPayRequestCode, payRequestExpiry,
   payRequestShareUrl, payRequestStatus, RECIPIENT_MAX,
 } from '../domain/pay-request';
+import { payRequestWebUrl } from '../domain/sponsor-checkout';
 
 export interface CreatePayRequestInput {
   obligationId: string;
@@ -86,12 +87,28 @@ export class PayRequestsService {
 
   /** The sponsor's page: no alias check (the code is the secret); records the first open. */
   async byCode(code: string, now = new Date()) {
-    if (!isPayRequestCode(code.toUpperCase())) throw new DomainError('NOT_FOUND', 'This request link is not valid');
+    return this.present(await this.openRow(code, now), now);
+  }
+
+  /** The web page (/p/{code}): the view plus what checkout needs. Records the first open too. */
+  async forSponsor(code: string, now = new Date()) {
+    const row = await this.openRow(code, now);
+    return {
+      id: row.id,
+      view: this.present(row, now),
+      payer: { kind: row.payer.kind, ref: row.payer.ref },
+      requested: row.amount,
+      paid: row.payments.reduce((s, p) => s + p.amount, 0n),
+    };
+  }
+
+  private async openRow(code: string, now: Date): Promise<Row> {
     const c = code.toUpperCase();
+    if (!isPayRequestCode(c)) throw new DomainError('NOT_FOUND', 'This request link is not valid');
     await this.prisma.payRequest.updateMany({ where: { code: c, openedAt: null }, data: { openedAt: now } });
     const row = await this.prisma.payRequest.findUnique({ where: { code: c }, include });
     if (!row) throw new DomainError('NOT_FOUND', 'This request link is not valid');
-    return this.present(row, now);
+    return row;
   }
 
   async listFor(payer: Payer, now = new Date()) {
@@ -138,6 +155,8 @@ export class PayRequestsService {
     return {
       code: r.code,
       shareUrl: payRequestShareUrl(this.config.get('DOT_LINK'), { code: r.code, kind, ref: r.payer.ref, obligationId: r.obligationId, amount: r.amount }),
+      /** opens in any browser: card or mobile money through Monime's checkout */
+      webUrl: payRequestWebUrl(this.config.get('PUBLIC_BASE_URL'), r.code),
       obligationId: r.obligationId,
       feeName: r.obligation.fee.name,
       amount: r.amount === null ? null : money(r.amount),
