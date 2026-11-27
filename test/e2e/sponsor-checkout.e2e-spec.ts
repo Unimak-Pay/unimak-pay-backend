@@ -89,23 +89,27 @@ describe('sponsor pays a pay request in a browser', () => {
     expect(p).toMatchObject({ channel: 'WEB', collectionMethod: 'CHECKOUT_SESSION', status: 'PENDING', amount: 20_000n, paidByName: 'Samuel', payerPhone: null });
     expect(p.checkoutUrl).toBe(res.headers.location);
     const session = await prisma.mockMonimeRecord.findUniqueOrThrow({ where: { id: p.checkoutSessionId! } });
-    expect(session.data).toMatchObject({ method: 'card', reference: p.id, successUrl: expect.stringMatching(new RegExp(`/p/${code}/done\\?ref=${p.paymentRef}$`)), metadata: { paymentId: p.id } });
+    expect(session.data).toMatchObject({ method: 'card', reference: p.id, successUrl: expect.stringMatching(new RegExp(`/p/${code}/done/${p.paymentRef}$`)), metadata: { paymentId: p.id } });
 
     // a double submit of the same form opens the same page
     const again = await submit(code, { method: 'card', key: k, name: 'Samuel' }).expect(303);
     expect(again.headers.location).toBe(res.headers.location);
     expect(await prisma.payment.count({ where: { payRequest: { code } } })).toBe(1);
 
-    const waiting = await http.get(`/p/${code}/done?ref=${p.paymentRef}`).set('x-real-ip', ip()).expect(200);
+    const waiting = await http.get(`/p/${code}/done/${p.paymentRef}`).set('x-real-ip', ip()).expect(200);
     expect(waiting.text).toContain('Waiting for confirmation');
 
     await http.post('/dev/monime/simulate-webhook').send({ paymentId: p.id, outcome: 'completed', channelType: 'card' }).expect(200);
     const after = await prisma.payment.findUniqueOrThrow({ where: { id: p.id } });
     expect(after).toMatchObject({ status: 'COMPLETED', monimeChannelType: 'card' });
 
-    const done = await http.get(`/p/${code}/done?ref=${p.paymentRef}`).set('x-real-ip', ip()).expect(200);
-    expect(done.text).toContain('Payment received');
-    expect(done.text).toMatch(/UNIMAK-\d{4}-\d+/);
+    // the return URL as we send it, the old ?ref= form, and that form with its "?" percent-encoded
+    for (const url of [`/p/${code}/done/${p.paymentRef}`, `/p/${code}/done?ref=${p.paymentRef}`, `/p/${code}/done%3Fref%3D${p.paymentRef}`]) {
+      const done = await http.get(url).set('x-real-ip', ip()).expect(200).expect('content-type', /html/);
+      expect(done.text).toContain('Payment received');
+      expect(done.text).toMatch(/UNIMAK-\d{4}-\d+/);
+    }
+    await http.get(`/p/${code}/nonsense`).set('x-real-ip', ip()).expect(404).expect('content-type', /html/);
     const closed = await http.get(`/p/${code}`).set('x-real-ip', ip()).expect(200);
     expect(closed.text).toContain('already been paid');
     await submit(code, { method: 'momo', key: key() }).expect(409);

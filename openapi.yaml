@@ -182,11 +182,43 @@ paths:
         '429': { description: Too many checkout pages for this link (or this IP), content: { text/html: { schema: { type: string } } } }
         '503': { description: Monime unavailable, content: { text/html: { schema: { type: string } } } }
 
+  /p/{code}/done/{ref}:
+    get:
+      operationId: publicSponsorDonePath
+      tags: [Public]
+      summary: Where Monime sends the sponsor back (the successUrl we give it)
+      description: |
+        Same page as `/p/{code}/done?ref=`. The successUrl carries the paymentRef in the path, so
+        there is no query string for the checkout to re-encode.
+      security: []
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: ref, in: path, required: true, schema: { type: string, pattern: '^[1-9]\d{7}$' }, description: The payment's paymentRef }
+      responses:
+        '200': { description: Waiting, paid or not completed, content: { text/html: { schema: { type: string } } } }
+        '404': { description: No such payment for this request, content: { text/html: { schema: { type: string } } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /p/{code}/{tail}:
+    get:
+      operationId: publicSponsorDoneEncoded
+      tags: [Public]
+      summary: The return page when its "?" arrived percent-encoded (`done%3Fref%3D<paymentRef>`)
+      description: For checkout sessions created with the older `done?ref=` successUrl. Anything else is a 404 page.
+      security: []
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+        - { name: tail, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Waiting, paid or not completed, content: { text/html: { schema: { type: string } } } }
+        '404': { description: Not a return page, or no such payment, content: { text/html: { schema: { type: string } } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   /p/{code}/done:
     get:
       operationId: publicSponsorDone
       tags: [Public]
-      summary: Where Monime sends the sponsor back (successUrl)
+      summary: Return page, older ?ref= form (sessions created before the path form)
       description: |
         "Waiting for confirmation" (refreshes every 5 s) until Monime's payment.completed arrives,
         then the receipt number and a link to the receipt check page. Nothing is settled from this

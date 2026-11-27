@@ -69,10 +69,32 @@ export class PublicSponsorController {
     }
   }
 
+  /** Monime's successUrl: the ref is in the path, so there is no query string for it to re-encode. */
+  @Get(':code/done/:ref')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  @Header('Cache-Control', 'no-store')
+  async donePath(@Param('code') code: string, @Param('ref') ref: string, @Res() res: Response): Promise<void> {
+    await this.done(code, ref, res);
+  }
+
+  /** Sessions created before the path form: ?ref=… */
   @Get(':code/done')
   @Header('Content-Type', 'text/html; charset=utf-8')
   @Header('Cache-Control', 'no-store')
-  async done(@Param('code') code: string, @Query('ref') ref: string | undefined, @Res() res: Response): Promise<void> {
+  async doneQuery(@Param('code') code: string, @Query('ref') ref: string | undefined, @Res() res: Response): Promise<void> {
+    await this.done(code, ref, res);
+  }
+
+  /** …and the same URL with its "?" percent-encoded into the path ("done%3Fref%3D…"). */
+  @Get(':code/:tail')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  @Header('Cache-Control', 'no-store')
+  async doneEncoded(@Param('code') code: string, @Param('tail') tail: string, @Res() res: Response): Promise<void> {
+    const m = /^done\?ref=(\d{8})/.exec(tail);
+    await this.done(code, m?.[1], res);
+  }
+
+  private async done(code: string, ref: string | undefined, res: Response): Promise<void> {
     const c = code.slice(0, 20);
     const s = typeof ref === 'string' ? await this.sponsor.state(c, ref.slice(0, 20)) : null;
     if (!s) {

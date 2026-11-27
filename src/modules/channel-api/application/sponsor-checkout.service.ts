@@ -97,7 +97,7 @@ export class SponsorCheckoutService {
         method: input.method,
         name: `UNIMAK · ${page.feeName}`,
         lineItemName: `${page.feeName} for ${page.firstName}`,
-        successUrl: (x) => `${base}/p/${page.code}/done?ref=${x.paymentRef}`,
+        successUrl: (x) => `${base}/p/${page.code}/done/${x.paymentRef}`,
         cancelUrl: () => `${base}/p/${page.code}`,
       },
     }, now);

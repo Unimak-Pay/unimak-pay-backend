@@ -134,7 +134,8 @@ browser, so the sponsor needs no app. `shareUrl` (the Dash link) is unchanged.
   `metadata.paymentId` = our payment id; settled into the fee type's financial account.
 - Double submit of the same form (same one-time `key` and method) returns the same page. At
   most 10 checkout pages per request per hour, plus the per-IP limit.
-- `GET /p/{code}/done?ref={paymentRef}` (Monime's `successUrl`): "waiting for confirmation",
+- `GET /p/{code}/done/{paymentRef}` (Monime's `successUrl`; the ref is in the path because a
+  query string came back percent-encoded into the path; the older `?ref=` form still works): "waiting for confirmation",
   refreshing every 5 s, until Monime's `payment.completed` settles it; then the receipt number
   and the receipt check link. `cancelUrl` goes back to `/p/{code}`.
 - Settlement is the existing `payment.completed` handler (matched by `metadata.paymentId`).
