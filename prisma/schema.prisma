@@ -312,9 +312,10 @@ model Payment {
   /// Monime's Payment channel.type from the completed payment: bank | card | momo | wallet
   monimeChannelType String?
 
-  obligation    Obligation    @relation(fields: [obligationId], references: [id])
-  pricingConfig PricingConfig @relation(fields: [pricingConfigId], references: [id])
-  payRequest    PayRequest?   @relation(fields: [payRequestId], references: [id])
+  obligation    Obligation       @relation(fields: [obligationId], references: [id])
+  pricingConfig PricingConfig    @relation(fields: [pricingConfigId], references: [id])
+  payRequest    PayRequest?      @relation(fields: [payRequestId], references: [id])
+  attempts      PaymentAttempt[]
   ledgerEntry   LedgerEntry?
   receipt       Receipt?
 
@@ -749,4 +750,22 @@ model ClearancePass {
   payer Payer @relation(fields: [payerId], references: [id])
 
   @@unique([payerId, period])
+}
+
+/// Each time the dot resumes a payment it gets a new Dash order reference (Dash keeps one
+/// payment per reference and won't reopen the sheet for it). Attempt 1 is the payment's
+/// own id and isn't stored. Any attempt's reference settles the payment.
+model PaymentAttempt {
+  id        String   @id @default(uuid()) @db.Uuid
+  paymentId String   @db.Uuid
+  /// 2, 3, … (1 = the original order, reference = paymentId)
+  attemptNo Int
+  /// "<paymentId>.<attemptNo>": the order reference Dash and Monime see
+  reference String   @unique
+  createdAt DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, attemptNo])
+  @@index([paymentId, createdAt])
 }

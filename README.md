@@ -369,7 +369,7 @@ a Vercel Firewall rate-limit rule on `/v1/dot/` for a global one.
 | POST | `/quotes` | `{obligationId, amount}`, channel DOTS |
 | POST | `/payments` | `{obligationId, amount, payRequestCode?, paidByName?, payingForSelf?}` + `Idempotency-Key` header → `{paymentId, paymentRef, status, amount, expiresAt, order, financialAccountId}` |
 | GET | `/payments/status/:ref` | by `paymentRef` or Monime's order number (payer masked) |
-| POST | `/payments/:paymentRef/resume` | a payment still awaiting payment: the same payment and order again (no new payment); 409 if processing, paid, failed/expired or started on USSD; 422 if the fee's payable dropped below it |
+| POST | `/payments/:paymentRef/resume` | a payment still awaiting payment: the same payment with a **new order reference** (`<paymentId>.<n>`; Dash won't reopen the sheet for a reference); any attempt settles it, two paid attempts settle once and flag the overpayment; 10 per payment per hour; 409 if processing, paid, failed/expired or started on USSD; 422 if the fee's payable dropped below it |
 | GET | `/payers/:kind/:ref/payments` | history (alias must match): completed, open, failed/expired from the last 30 days; `totalPaid` for the academic year |
 | GET | `/payers/:kind/:ref/receipts` | every receipt of the payer, newest first (alias must match) |
 | GET | `/payments/:paymentRef/receipt` | 404 until Monime completed it; `verifyUrl` = `/r/{verifyCode}`; `pdfUrl` null for now |

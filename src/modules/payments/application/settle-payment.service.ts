@@ -77,7 +77,7 @@ export class SettlePaymentService {
       return {
         ...base,
         outcome: 'UNMATCHED',
-        note: `Second Monime payment ${ev.monimePaymentId} for a payment already settled by ${p.monimePaymentId} (possible double charge)`,
+        note: `Paid twice: Monime payment ${ev.monimePaymentId} (${ev.currency} ${ev.amount}, reference ${ev.reference ?? '-'}) for payment ${p.paymentRef}, already settled by ${p.monimePaymentId}. Not counted on the fee: overpayment to refund or credit`,
       };
     }
     if (ev.currency !== 'SLE') {
@@ -197,6 +197,11 @@ export class SettlePaymentService {
     );
     for (const id of ids) {
       const p = await this.payments.byId(id, tx);
+      if (p) return p;
+    }
+    // a resumed payment: the order reference of one of its attempts ("<paymentId>.<n>")
+    if (ev.reference) {
+      const p = await this.payments.byAttemptReference(ev.reference, tx);
       if (p) return p;
     }
     for (const ref of [ev.ownerId, ev.monimePaymentId]) {

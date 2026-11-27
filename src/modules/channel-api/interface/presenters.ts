@@ -119,16 +119,23 @@ const truncate = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0
  * receiving account never come from the dot. `reference` is our payment id: Monime
  * echoes it (and the metadata) in payment.processing_completed, which settles it.
  */
-export function presentDotOrder(p: PaymentRecord, o: { feeName: string; payerRef: string; feeTypeCode: string }, payRequestCode?: string) {
+export function presentDotOrder(
+  p: PaymentRecord,
+  o: { feeName: string; payerRef: string; feeTypeCode: string },
+  payRequestCode?: string,
+  /** a resume: a new reference (Dash keeps one payment per reference), same everything else */
+  attempt?: { attemptNo: number; reference: string },
+) {
   const value = Number(p.amount);
   if (!Number.isSafeInteger(value)) throw new Error(`Amount ${p.amount} too large for a Dash order`);
   return {
     name: truncate(`UNIMAK ${o.feeName}`, 64),
-    reference: p.id,
+    reference: attempt?.reference ?? p.id,
     lineItems: [{ name: truncate(`${o.feeName} · ${o.payerRef}`, 64), unitPrice: { currency: 'SLE', value }, quantity: 1 }],
     metadata: {
       paymentId: p.id, paymentRef: p.paymentRef, obligationId: p.obligationId, payerRef: o.payerRef, feeTypeCode: o.feeTypeCode, channel: 'DOTS',
       ...(payRequestCode ? { payRequestCode } : {}),
+      ...(attempt ? { attempt: String(attempt.attemptNo) } : {}),
     },
   };
 }

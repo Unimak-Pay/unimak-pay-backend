@@ -116,7 +116,6 @@ describe('payment lifecycle', () => {
 });
 
 describe('POST /v1/dot/payments/{paymentRef}/resume', () => {
-  const REF2 = 'UNI-2026-0602';
   let ob2: string;
   const resume = (ref: string) => http.post(`/v1/dot/payments/${ref}/resume`).set('x-real-ip', ip());
   const start = async (amount: string) => {
@@ -124,24 +123,73 @@ describe('POST /v1/dot/payments/{paymentRef}/resume', () => {
     return r.body;
   };
 
-  beforeAll(async () => {
+  // each test gets its own student (UNI-2026-0602, 0603, …), so payments in one can't pay off another's fee
+  let n = 1;
+  let REF2 = '';
+  beforeEach(async () => {
+    REF2 = `UNI-2026-06${String(++n).padStart(2, '0')}`;
     await portal(http, 'post', '/v1/portal/events', { events: [{
-      id: `evt-resume-${Date.now()}`, type: 'student.upserted', occurredAt: '2026-11-28T09:00:00Z',
-      data: { studentId: REF2, applicationRef: null, fullName: 'Resume Case', phone: '+23276600602', programCode: 'BSC-CS', department: 'COMPUTER-SCI', level: 1, finalYear: false, residency: 'LOCAL', intake: '2026-SEP', enrolmentStatus: 'ACTIVE', updatedAt: '2026-11-28T09:00:00.000Z' },
+      id: `evt-resume-${Date.now()}-${n}`, type: 'student.upserted', occurredAt: '2026-11-28T09:00:00Z',
+      data: { studentId: REF2, applicationRef: null, fullName: 'Resume Case', phone: `+232766006${String(n).padStart(2, '0')}`, programCode: 'BSC-CS', department: 'COMPUTER-SCI', level: 1, finalYear: false, residency: 'LOCAL', intake: '2026-SEP', enrolmentStatus: 'ACTIVE', updatedAt: '2026-11-28T09:00:00.000Z' },
     }] }).expect(200);
     ob2 = (await prisma.obligation.findFirstOrThrow({ where: { payer: { ref: REF2 }, fee: { feeType: { code: 'TUITION' } } } })).id;
   });
 
-  it('a payment awaiting payment comes back with the same order; nothing new is created', async () => {
+  const completeRef = (paymentId: string, reference: string, monimeId: string, amount: number, metadata: Record<string, string> = {}) =>
+    monimeEvent(http, 'payment.processing_completed', { id: monimeId, type: 'payment' }, {
+      id: monimeId, status: 'completed', amount: { currency: 'SLE', value: amount }, reference, metadata,
+    }).expect(200);
+
+  it('each resume is a new order reference for the same payment; nothing new is created', async () => {
     const p = await start('150000');
     const before = await prisma.payment.count({ where: { obligationId: ob2 } });
-    const res = await resume(p.paymentRef).expect(200);
-    expect(res.body).toEqual(p);
-    expect(res.body.order.reference).toBe(p.paymentId);
+    const r1 = (await resume(p.paymentRef).expect(200)).body;
+    const r2 = (await resume(p.paymentRef).expect(200)).body;
+    expect(r1.order.reference).toBe(`${p.paymentId}.2`);
+    expect(r2.order.reference).toBe(`${p.paymentId}.3`);
+    for (const [r, n] of [[r1, '2'], [r2, '3']] as const) {
+      expect({ ...r, order: { ...r.order, reference: undefined, metadata: { ...r.order.metadata, attempt: undefined } } })
+        .toEqual({ ...p, order: { ...p.order, reference: undefined } });
+      expect(r.order.metadata).toMatchObject({ paymentId: p.paymentId, paymentRef: p.paymentRef, attempt: n });
+      expect(r.order.reference.length).toBeLessThanOrEqual(64);
+    }
     expect(await prisma.payment.count({ where: { obligationId: ob2 } })).toBe(before);
-    // paying that order settles this payment
-    await simulate(p.paymentId, 'completed');
+    // a webhook for the second attempt, by its reference alone, settles this payment
+    const done = await completeRef(p.paymentId, r1.order.reference, 'pay-resume-a2', 150000);
+    expect(done.body.result).toBe('PROCESSED');
     expect(await statusOf(p.paymentId)).toBe('COMPLETED');
+  });
+
+  it('the first attempt still settles it after a resume', async () => {
+    const p = await start('150000');
+    await resume(p.paymentRef).expect(200);
+    expect((await completeRef(p.paymentId, p.paymentId, 'pay-resume-b1', 150000)).body.result).toBe('PROCESSED');
+    expect(await statusOf(p.paymentId)).toBe('COMPLETED');
+  });
+
+  it('two attempts both paid: settled once, the second flagged as an overpayment', async () => {
+    const p = await start('150000');
+    const r = (await resume(p.paymentRef).expect(200)).body;
+    const balance = async () => (await prisma.ledgerEntry.aggregate({ where: { obligationId: ob2 }, _sum: { amount: true } }))._sum.amount ?? 0n;
+    await completeRef(p.paymentId, r.order.reference, 'pay-resume-c2', 150000);
+    const after = await balance();
+    const second = await completeRef(p.paymentId, p.paymentId, 'pay-resume-c1', 150000, { paymentId: p.paymentId });
+    expect(second.body).toMatchObject({ result: 'UNMATCHED', note: expect.stringContaining(`Paid twice: Monime payment pay-resume-c1`) });
+    expect(second.body.note).toContain('overpayment to refund or credit');
+    expect(await balance()).toBe(after); // never counted twice on the fee
+    expect(await prisma.ledgerEntry.count({ where: { paymentId: p.paymentId } })).toBe(1);
+    expect(await prisma.payment.findUniqueOrThrow({ where: { id: p.paymentId } })).toMatchObject({ status: 'COMPLETED', monimePaymentId: 'pay-resume-c2' });
+    // shown in the admin reconciliation view
+    expect(await prisma.webhookEvent.findFirstOrThrow({ where: { payload: { path: ['data', 'id'], equals: 'pay-resume-c1' } } })).toMatchObject({ status: 'UNMATCHED' });
+  });
+
+  it('at most 10 resumes an hour per payment', async () => {
+    const p = await start('150000');
+    for (let i = 0; i < 10; i++) await resume(p.paymentRef).expect(200);
+    const res = await resume(p.paymentRef).expect(429);
+    expect(res.body.error.code).toBe('RATE_LIMITED');
+    expect(Number(res.headers['retry-after'])).toBeGreaterThan(3000);
+    expect(await prisma.paymentAttempt.count({ where: { paymentId: p.paymentId } })).toBe(10);
   });
 
   it('409 once processing, paid, failed or expired; 404 when gone or unknown', async () => {

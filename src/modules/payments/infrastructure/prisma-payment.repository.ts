@@ -23,6 +23,23 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return db.payment.findUnique({ where: { paymentRef } });
   }
 
+  async byAttemptReference(reference: string, db: Db = this.prisma): Promise<PaymentRecord | null> {
+    return (await db.paymentAttempt.findUnique({ where: { reference }, include: { payment: true } }))?.payment ?? null;
+  }
+
+  async newAttempt(paymentId: string, maxPerHour: number, now: Date, db: Db): Promise<{ attemptNo: number; reference: string } | { retryAfterSec: number }> {
+    const hourAgo = new Date(now.getTime() - 3_600_000);
+    const recent = await db.paymentAttempt.findMany({ where: { paymentId, createdAt: { gt: hourAgo } }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } });
+    if (recent.length >= maxPerHour) {
+      return { retryAfterSec: Math.max(1, Math.ceil((recent[0]!.createdAt.getTime() + 3_600_000 - now.getTime()) / 1000)) };
+    }
+    const last = await db.paymentAttempt.findFirst({ where: { paymentId }, orderBy: { attemptNo: 'desc' }, select: { attemptNo: true } });
+    const attemptNo = (last?.attemptNo ?? 1) + 1;
+    const reference = `${paymentId}.${attemptNo}`;
+    await db.paymentAttempt.create({ data: { paymentId, attemptNo, reference, createdAt: now } });
+    return { attemptNo, reference };
+  }
+
   byMonimeRef(monimeRef: string, db: Db = this.prisma): Promise<PaymentRecord | null> {
     return db.payment.findUnique({ where: { monimeRef } });
   }

@@ -93,6 +93,13 @@ export interface PaymentRepository {
   byId(id: string, db?: Db): Promise<PaymentRecord | null>;
   /** by our 8-digit payment ref */
   byPaymentRef(paymentRef: string, db?: Db): Promise<PaymentRecord | null>;
+  /** by the order reference of one of its resume attempts ("<paymentId>.<n>") */
+  byAttemptReference(reference: string, db?: Db): Promise<PaymentRecord | null>;
+  /**
+   * Records a new attempt (2, 3, …) and returns its order reference. Refused (null) when the
+   * payment already had `maxPerHour` attempts in the last hour; `retryAfterSec` says when to try.
+   */
+  newAttempt(paymentId: string, maxPerHour: number, now: Date, db: Db): Promise<{ attemptNo: number; reference: string } | { retryAfterSec: number }>;
   byMonimeRef(ref: string, db?: Db): Promise<PaymentRecord | null>;
   byMonimePaymentId(id: string, db?: Db): Promise<PaymentRecord | null>;
   byIdempotencyKey(clientId: string, key: string, db?: Db): Promise<PaymentRecord | null>;

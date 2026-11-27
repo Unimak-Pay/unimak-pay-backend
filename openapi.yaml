@@ -439,27 +439,31 @@ paths:
       tags: [Dash dot]
       summary: Pay a payment that is still awaiting payment
       description: |
-        Returns the same body as `POST /v1/dot/payments` (201) for a PENDING or INITIATED payment: the same
-        payment, `order` (reference = our payment id) and `financialAccountId`, so paying it settles this
-        payment. Nothing new is created. No `X-User-Alias` match: the paymentRef is the secret, as for the
-        status check (sponsors can finish their own payment).
+        For a PENDING or INITIATED payment: the same body as `POST /v1/dot/payments` (201) with a **new order
+        reference** each call (`<paymentId>.2`, `.3`, …; `metadata.attempt`). Dash keeps one payment per order
+        reference and won't show the sheet again for one the person already started, so the old order can't
+        be reused. Amount, line items, `financialAccountId`, `metadata.paymentId` and `metadata.paymentRef`
+        stay the same, and nothing new is created: Monime's confirmation of **any** attempt settles this
+        payment. If two attempts are both paid, the payment is settled once and the second is flagged in
+        reconciliation as an overpayment to refund or credit (never counted twice on the fee). Status,
+        receipts and history stay keyed by `paymentRef`.
+
+        No `X-User-Alias` match: the paymentRef is the secret, as for the status check.
         - PROCESSING: 409 `INVALID_STATE` "This payment is already being processed."
         - COMPLETED: 409 "This payment is already paid."
         - FAILED / EXPIRED: 409 "This payment can't be paid any more. Start a new one."
         - Started on USSD (a payment code): 409 "This payment was started on USSD. Finish it there, or start a
-          new one here." (its code is still live at Monime; paying through Dash too could collect twice)
+          new one here."
         - Unknown or deleted: 404.
-        - The amount is checked against the fee's payable now, as quotes do: 422 `AMOUNT_EXCEEDS_PAYABLE` if
-          another payment has taken the fee below it.
-        Calling `dash.payments.request()` again with this order is safe: Monime only records a payment once the
-        person confirms it, so one order can't be paid twice (if it ever were, reconciliation settles it).
+        - The amount is checked against the fee's payable now, as quotes do: 422 `AMOUNT_EXCEEDS_PAYABLE`.
+        - At most 10 resumes per payment per hour: 429 `RATE_LIMITED` with `Retry-After` (plus the per-IP limit).
       security: []
       parameters:
         - { name: paymentRef, in: path, required: true, schema: { $ref: '#/components/schemas/PaymentRef' } }
         - $ref: '#/components/parameters/UserAlias'
       responses:
         '200':
-          description: The payment and its order, as when it was started
+          description: The payment and a new order (new reference) for it
           content:
             application/json:
               schema:
@@ -2664,11 +2668,14 @@ components:
         amount: { $ref: '#/components/schemas/MinorAmount' }
     DashOrder:
       type: object
-      description: 'The `order` for dash.payments.request(). `reference` is our payment id; unitPrice.value is a number of minor units.'
+      description: |
+        The `order` for dash.payments.request(). `reference` is our payment id for a new payment, and a new
+        `<paymentId>.<n>` for each resume (Dash keeps one payment per reference and won't reopen the sheet for
+        it). unitPrice.value is a number of minor units.
       required: [name, reference, lineItems, metadata]
       properties:
         name: { type: string, maxLength: 64, example: UNIMAK Tuition 2026/27 }
-        reference: { type: string, format: uuid }
+        reference: { type: string, maxLength: 64, examples: ['3f6c…-uuid', '3f6c…-uuid.2'] }
         lineItems:
           type: array
           minItems: 1
@@ -2685,7 +2692,10 @@ components:
                   currency: { const: SLE }
                   value: { type: integer, example: 150000 }
               quantity: { const: 1 }
-        metadata: { type: object, additionalProperties: { type: string } }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+          description: 'paymentId, paymentRef, obligationId, payerRef, feeTypeCode, channel; payRequestCode when paying a request; attempt ("2", "3", …) on a resume.'
     RepriceReport:
       type: object
       required: [fee, applied, changes, skipped, unchanged, totals]

@@ -44,3 +44,14 @@ Status: **built** (2026-11-28, owner decisions). Payments no longer expire after
 - **USSD payment codes.** Monime handles their lifetime; an expired or cancelled code at Monime leaves our payment as
   it is. "Check with Monime" (`POST /v1/admin/payments/{id}/reconcile`) only reports.
 - The `pg_cron` job that expired payments every 5 minutes is unscheduled by migration `20261128090000_payment_processing`.
+
+## Resuming a payment (dot)
+
+`POST /v1/dot/payments/{paymentRef}/resume` gives the same payment a **new Dash order reference** each time
+(`<paymentId>.2`, `.3`, …, stored in `PaymentAttempt`; `metadata.attempt`). Dash keeps one payment per order
+reference and won't reopen the sheet for one the person already started (e.g. picked mobile money, then didn't approve
+the prompt). Settlement finds the payment by its id, any attempt's reference, or `metadata.paymentId`, so an old
+prompt approved later still settles it. If two attempts are both paid, the payment is settled once; the second is
+UNMATCHED ("Paid twice … overpayment to refund or credit") in the webhook events and the nightly reconciliation, and
+never counted on the fee. At most 10 resumes per payment per hour. A new payment (`POST /v1/dot/payments`) and its
+idempotent replays keep reference = paymentId.
