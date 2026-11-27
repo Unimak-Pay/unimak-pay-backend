@@ -3,6 +3,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { reportedMsisdn } from '../../../shared/domain/phone';
 import {
   type BankView,
+  type CheckoutSessionView,
+  type CreateCheckoutSessionInput,
   type CreateFinancialAccountInput,
   type CreateInternalTransferInput,
   type CreatePaymentCodeInput,
@@ -49,6 +51,13 @@ interface WirePaymentCode {
   expireTime?: string | null;
   reference?: string | null;
   amount: WireAmount;
+}
+interface WireCheckoutSession {
+  id: string;
+  status: CheckoutSessionView['status'];
+  redirectUrl?: string | null;
+  orderNumber?: string | null;
+  expireTime?: string | null;
 }
 interface WireFinancialAccount {
   id: string;
@@ -125,6 +134,25 @@ export class HttpMonimeClient implements MonimeClient {
 
   async getPaymentCode(id: string): Promise<PaymentCodeView> {
     return toPaymentCode(await this.get<WirePaymentCode>(`/payment-codes/${enc(id)}`));
+  }
+
+  // ── Checkout sessions ──────────────────────────────────────────────────────
+
+  async createCheckoutSession(input: CreateCheckoutSessionInput): Promise<CheckoutSessionView> {
+    const cs = await this.post<WireCheckoutSession>('/checkout-sessions', input.idempotencyKey, {
+      name: input.name.slice(0, 150),
+      ...(input.description ? { description: input.description.slice(0, 1000) } : {}),
+      reference: input.reference,
+      financialAccountId: input.financialAccountId,
+      successUrl: input.successUrl,
+      cancelUrl: input.cancelUrl,
+      lineItems: [{ type: 'custom', name: input.lineItemName.slice(0, 100), price: toWire(input.amount), quantity: 1, reference: input.reference.slice(0, 100) }],
+      paymentOptions: checkoutPaymentOptions(input.method),
+      ...(input.primaryColor ? { brandingOptions: { primaryColor: input.primaryColor } } : {}),
+      metadata: sanitizeMetadata(input.metadata),
+    });
+    if (!cs.redirectUrl) throw new MonimeError('BAD_RESPONSE', `Checkout session ${cs.id} has no redirectUrl`);
+    return { id: cs.id, status: cs.status, redirectUrl: cs.redirectUrl, orderNumber: cs.orderNumber ?? null, expireTime: cs.expireTime ?? null };
   }
 
   // ── Payments ───────────────────────────────────────────────────────────────
@@ -285,6 +313,16 @@ export class HttpMonimeClient implements MonimeClient {
 // ── Mapping ──────────────────────────────────────────────────────────────────
 
 const enc = encodeURIComponent;
+
+/** Only the chosen method stays on; bank and wallet are always off. */
+export function checkoutPaymentOptions(method: CreateCheckoutSessionInput['method']) {
+  return {
+    card: { disable: method !== 'card' },
+    momo: { disable: method !== 'momo' },
+    bank: { disable: true },
+    wallet: { disable: true },
+  };
+}
 
 function toWire(value: bigint): { currency: 'SLE'; value: number } {
   const n = Number(value);

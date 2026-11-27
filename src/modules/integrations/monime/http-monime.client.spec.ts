@@ -38,6 +38,32 @@ describe('HttpMonimeClient request shapes (caph.2025-08-23)', () => {
     expect(res).toEqual({ id: 'pmc-1', status: 'pending', ussdCode: '*715*1*123#', expireTime: 't', reference: 'pay-1', amount: 15_000n });
   });
 
+  it('creates a checkout session offering only the chosen method', async () => {
+    const f = fakeFetch([ok({ id: 'cos-1', status: 'pending', redirectUrl: 'https://checkout.monime.io/cos-1', orderNumber: null, expireTime: 't' })]);
+    const res = await new HttpMonimeClient(cfg, f.fn).createCheckoutSession({
+      idempotencyKey: 'pay-1', name: 'UNIMAK · Tuition', lineItemName: 'Tuition for Aminata', amount: 50_000n, reference: 'pay-1',
+      financialAccountId: 'fac-tui', successUrl: 'https://u/p/ABC/done?ref=1', cancelUrl: 'https://u/p/ABC', method: 'card',
+      primaryColor: '#13261F', metadata: { paymentId: 'pay-1' },
+    });
+    const c = f.calls[0]!;
+    expect(c.url).toBe('https://api.monime.io/v1/checkout-sessions');
+    expect(headers(c)['Idempotency-Key']).toBe('pay-1');
+    expect(body(c)).toEqual({
+      name: 'UNIMAK · Tuition', reference: 'pay-1', financialAccountId: 'fac-tui', successUrl: 'https://u/p/ABC/done?ref=1', cancelUrl: 'https://u/p/ABC',
+      lineItems: [{ type: 'custom', name: 'Tuition for Aminata', price: { currency: 'SLE', value: 50000 }, quantity: 1, reference: 'pay-1' }],
+      paymentOptions: { card: { disable: false }, momo: { disable: true }, bank: { disable: true }, wallet: { disable: true } },
+      brandingOptions: { primaryColor: '#13261F' }, metadata: { paymentId: 'pay-1' },
+    });
+    expect(res).toEqual({ id: 'cos-1', status: 'pending', redirectUrl: 'https://checkout.monime.io/cos-1', orderNumber: null, expireTime: 't' });
+  });
+
+  it('a checkout session without a redirectUrl is a bad response', async () => {
+    const f = fakeFetch([ok({ id: 'cos-2', status: 'pending' })]);
+    await expect(new HttpMonimeClient(cfg, f.fn).createCheckoutSession({
+      idempotencyKey: 'k', name: 'n', lineItemName: 'l', amount: 1n, reference: 'r', financialAccountId: 'f', successUrl: 's', cancelUrl: 'c', method: 'momo', metadata: {},
+    })).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+  });
+
   it('creates a financial account with a unique reference; finds by reference', async () => {
     const f = fakeFetch([
       ok({ id: 'fac-1', uvan: '123', name: 'UNIMAK Tuition', currency: 'SLE', reference: 'unimak-fee-tuition' }),

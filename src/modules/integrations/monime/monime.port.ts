@@ -35,6 +35,39 @@ export interface PaymentCodeView {
   amount: bigint;
 }
 
+// ── Checkout sessions (Monime's hosted payment page) ───────────────────────
+
+/** Which method the hosted page offers; the others are turned off (paymentOptions). */
+export type CheckoutMethod = 'card' | 'momo';
+
+export interface CreateCheckoutSessionInput {
+  idempotencyKey: string;
+  /** ≤ 150 chars, shown on the page */
+  name: string;
+  description?: string;
+  /** one line item, minor units */
+  lineItemName: string;
+  amount: bigint;
+  /** our payment id (≤ 255 chars) */
+  reference: string;
+  financialAccountId: string;
+  successUrl: string;
+  cancelUrl: string;
+  method: CheckoutMethod;
+  /** hex, e.g. #13261F */
+  primaryColor?: string;
+  metadata: Record<string, string>;
+}
+
+export interface CheckoutSessionView {
+  id: string;
+  status: 'pending' | 'completed' | 'cancelled' | 'expired';
+  /** Monime's hosted page to send the payer to */
+  redirectUrl: string;
+  orderNumber: string | null;
+  expireTime: string | null;
+}
+
 // ── Payments (what Monime collected) ────────────────────────────────────────
 
 /** A Monime Payment object (GET /v1/payments). */
@@ -166,6 +199,8 @@ export class MonimeError extends Error {
 export interface MonimeClient {
   createPaymentCode(input: CreatePaymentCodeInput): Promise<PaymentCodeView>;
   getPaymentCode(id: string): Promise<PaymentCodeView>;
+
+  createCheckoutSession(input: CreateCheckoutSessionInput): Promise<CheckoutSessionView>;
 
   /** Payments received into an account. TODO(monime): ordering isn't documented. */
   listPayments(q: { financialAccountId: string; after?: string | null; limit?: number }): Promise<MonimePage<MonimePaymentRecord>>;

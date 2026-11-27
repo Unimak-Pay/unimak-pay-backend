@@ -3,6 +3,8 @@ import type { Prisma } from '@prisma/client';
 import type { PrismaService } from '../../../shared/infrastructure/prisma.service';
 import {
   type BankView,
+  type CheckoutSessionView,
+  type CreateCheckoutSessionInput,
   type CreateFinancialAccountInput,
   type CreateInternalTransferInput,
   type CreatePaymentCodeInput,
@@ -18,7 +20,7 @@ import {
   type PayoutView,
 } from './monime.port';
 
-type Kind = 'PAYMENT_CODE' | 'PAYMENT' | 'ACCOUNT' | 'TRANSFER' | 'PAYOUT' | 'WEBHOOK';
+type Kind = 'PAYMENT_CODE' | 'CHECKOUT_SESSION' | 'PAYMENT' | 'ACCOUNT' | 'TRANSFER' | 'PAYOUT' | 'WEBHOOK';
 
 /** Same ids as the real ones from GET /v1/banks?country=SL (enum in the spec). */
 const MOCK_BANKS: BankView[] = [
@@ -55,6 +57,25 @@ export class MockMonimeClient implements MonimeClient {
 
   async getPaymentCode(id: string): Promise<PaymentCodeView> {
     return this.toPaymentCode(await this.find(id, 'PAYMENT_CODE'));
+  }
+
+  // ── Checkout sessions ──────────────────────────────────────────────────────
+
+  /** The hosted page is not simulated: complete the payment with POST /dev/monime/simulate-webhook. */
+  async createCheckoutSession(input: CreateCheckoutSessionInput): Promise<CheckoutSessionView> {
+    const id = `cos-mock-${input.reference}`.slice(0, 64);
+    const row = await this.create(id, 'CHECKOUT_SESSION', 'pending', input.amount, {
+      idempotencyKey: input.idempotencyKey,
+      name: input.name,
+      lineItemName: input.lineItemName,
+      reference: input.reference,
+      financialAccountId: input.financialAccountId,
+      successUrl: input.successUrl,
+      cancelUrl: input.cancelUrl,
+      method: input.method,
+      metadata: input.metadata,
+    });
+    return { id: row.id, status: 'pending', redirectUrl: `https://checkout.mock.monime.io/${encodeURIComponent(row.id)}`, orderNumber: null, expireTime: null };
   }
 
   // ── Payments ───────────────────────────────────────────────────────────────
